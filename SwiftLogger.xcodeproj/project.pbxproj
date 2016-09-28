@@ -9,7 +9,8 @@
 /* Begin PBXBuildFile section */
 		69F89E6D1D8A1C3600C43363 /* SwiftLogger.h in Headers */ = {isa = PBXBuildFile; fileRef = 69F89E6C1D8A1C3600C43363 /* SwiftLogger.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		69F89E741D8A1C3600C43363 /* SwiftLogger.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 69F89E691D8A1C3600C43363 /* SwiftLogger.framework */; settings = {ASSET_TAGS = (); }; };
-		69F89E791D8A1C3600C43363 /* SwiftLoggerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69F89E781D8A1C3600C43363 /* SwiftLoggerTests.swift */; };
+		69F89E791D8A1C3600C43363 /* Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69F89E781D8A1C3600C43363 /* Tests.swift */; };
+		69F89E851D8A1D6900C43363 /* SwiftLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69F89E841D8A1D6900C43363 /* SwiftLogger.swift */; settings = {ASSET_TAGS = (); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,8 +28,9 @@
 		69F89E6C1D8A1C3600C43363 /* SwiftLogger.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SwiftLogger.h; sourceTree = "<group>"; };
 		69F89E6E1D8A1C3600C43363 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		69F89E731D8A1C3600C43363 /* SwiftLoggerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftLoggerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		69F89E781D8A1C3600C43363 /* SwiftLoggerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftLoggerTests.swift; sourceTree = "<group>"; };
+		69F89E781D8A1C3600C43363 /* Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests.swift; sourceTree = "<group>"; };
 		69F89E7A1D8A1C3600C43363 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		69F89E841D8A1D6900C43363 /* SwiftLogger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SwiftLogger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,8 +55,8 @@
 		69F89E5F1D8A1C3600C43363 = {
 			isa = PBXGroup;
 			children = (
-				69F89E6B1D8A1C3600C43363 /* SwiftLogger */,
-				69F89E771D8A1C3600C43363 /* SwiftLoggerTests */,
+				69F89E6B1D8A1C3600C43363 /* Source */,
+				69F89E771D8A1C3600C43363 /* Tests */,
 				69F89E6A1D8A1C3600C43363 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -68,22 +70,33 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		69F89E6B1D8A1C3600C43363 /* SwiftLogger */ = {
+		69F89E6B1D8A1C3600C43363 /* Source */ = {
 			isa = PBXGroup;
 			children = (
 				69F89E6C1D8A1C3600C43363 /* SwiftLogger.h */,
-				69F89E6E1D8A1C3600C43363 /* Info.plist */,
+				69F89E841D8A1D6900C43363 /* SwiftLogger.swift */,
+				69F89E831D8A1D2700C43363 /* Config */,
 			);
+			name = Source;
 			path = SwiftLogger;
 			sourceTree = "<group>";
 		};
-		69F89E771D8A1C3600C43363 /* SwiftLoggerTests */ = {
+		69F89E771D8A1C3600C43363 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
-				69F89E781D8A1C3600C43363 /* SwiftLoggerTests.swift */,
+				69F89E781D8A1C3600C43363 /* Tests.swift */,
 				69F89E7A1D8A1C3600C43363 /* Info.plist */,
 			);
+			name = Tests;
 			path = SwiftLoggerTests;
+			sourceTree = "<group>";
+		};
+		69F89E831D8A1D2700C43363 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				69F89E6E1D8A1C3600C43363 /* Info.plist */,
+			);
+			name = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -142,6 +155,7 @@
 		69F89E601D8A1C3600C43363 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				LastSwiftUpdateCheck = 0700;
 				LastUpgradeCheck = 0700;
 				ORGANIZATIONNAME = "Nicholas Molyneux";
 				TargetAttributes = {
@@ -193,6 +207,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				69F89E851D8A1D6900C43363 /* SwiftLogger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -200,7 +215,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				69F89E791D8A1C3600C43363 /* SwiftLoggerTests.swift in Sources */,
+				69F89E791D8A1C3600C43363 /* Tests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -307,6 +322,8 @@
 		69F89E7E1D8A1C3600C43363 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
@@ -317,12 +334,15 @@
 				PRODUCT_BUNDLE_IDENTIFIER = molynerd.SwiftLogger;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
 		69F89E7F1D8A1C3600C43363 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_MODULES = YES;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
@@ -375,6 +395,7 @@
 				69F89E7F1D8A1C3600C43363 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 		69F89E801D8A1C3600C43363 /* Build configuration list for PBXNativeTarget "SwiftLoggerTests" */ = {
 			isa = XCConfigurationList;
@@ -383,6 +404,7 @@
 				69F89E821D8A1C3600C43363 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
