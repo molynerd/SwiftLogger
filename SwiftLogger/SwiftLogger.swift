@@ -33,10 +33,11 @@ log.debug("message")
 //step 3: read the logs
 log.getLogs()
 
+//step 4: purge the logs
+log.purgeLogs()
+
 todo:
 >async
->file writing
->file reading
 >create a delegate that responds to events like "tailFlushedToDisk, logWrittenToTail" and others, in case someone wants to hook into the events and fire off the bug report automatically
 >figure out how to call a method on application exit/crash etc so we can flush the tail
 >write some stuff to the log on startup? maybe as a diagnostics setting?
@@ -44,7 +45,15 @@ todo:
 
 import Foundation
 
+@objc
+public protocol SwiftLoggerDelegate: NSObjectProtocol {
+    optional func swiftLogger(didFlushTailToDisk flushed: Bool, wasManual: Bool)
+}
+
 public class SwiftLogger {
+    /**Determines if logging can occur. This is set to false if problems were encountered during initialization*/
+    var loggingIsActive: Bool = true
+    
     /**NSFileManager singleton instance*/
     private let _fileManager: NSFileManager = NSFileManager.defaultManager()
     /**Logging location*/
@@ -57,23 +66,29 @@ public class SwiftLogger {
     private var _nextFileNumber: Int = 1
     /**The prefix for files created by the logger*/
     private let _logFileNamePrefix: String = "log_"
-    //todo: implement this so we can prevent crashing later and switch to debug logging
-    /**Determines if logging can occur. This is set to false if problems were encountered during initialization*/
-    private var _canLog: Bool = true
+    private let _delegate: SwiftLoggerDelegate?
+    //log levels. you might be asking... why ERRR and FATL? it's because im kinda OCD about how the log looks and this makes everything line up vertically.
+    private let _LOGLEVEL_INFO =     "INFO"
+    private let _LOGLEVEL_DEBUG =    "DEBG"
+    private let _LOGLEVEL_WARN =     "WARN"
+    private let _LOGLEVEL_ERROR =    "ERRR"
+    private let _LOGLEVEL_FATAL =    "FATL"
     
     /**
         Creates an instance of the logger
     
         - Parameter directory: The directory in which to save log files. Defaults to `.ApplicationSupportDirectory`.
         - Parameter domain: The file system domain to search for the directory. Defaults to `.UserDomainMask`.
-        - Parameter explodeOnFailureToInit: If true, a fatal error will occur if the initialization fails. Defaults to true assuming that the application is dependent on logging. If this is not the case, simply use false here, and only `debugPrint` will be advise you that no logging will occur.
+        - Parameter explodeOnFailureToInit: If true, a fatal error will occur if the initialization fails. Defaults to true assuming that the application is dependent on logging. If this is not the case, simply use false here, and only `debugPrint` will be advise you that no logging will occur, denoted by "SWIFTLOGGER-NOLOG".
         - Parameter fileSize: The size of the tail before writing a disk, in bytes, this is effectively the size of each file
     */
     init(
+        delegate: SwiftLoggerDelegate? = nil,
         directory: NSSearchPathDirectory = .ApplicationSupportDirectory,
         domain: NSSearchPathDomainMask = .UserDomainMask,
         explodeOnFailureToInit: Bool = true,
         fileSize: Int = 1000) {
+            self._delegate = delegate
             self._fileSize = fileSize
             //create the logging directory
             let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .UserDomainMask, true).first!
@@ -88,7 +103,7 @@ public class SwiftLogger {
                         fatalError("SWIFTLOGGER failed getting log directory due to: \(error)")
                     } else {
                         debugPrint("SWIFTLOGGER", "no logging will occur, due to the failure above.")
-                        self._canLog = false
+                        self.loggingIsActive = false
                     }
                     return
                 }
@@ -106,7 +121,7 @@ public class SwiftLogger {
                     fatalError("SWIFTLOGGER failed getting current contents of logging directory due to: \(error)")
                 } else {
                     debugPrint("SWIFTLOGGER", "no logging will occur, due to the failure above.")
-                    self._canLog = false
+                    self.loggingIsActive = false
                 }
             }
             if let lf = lastFile where lf != "" {
@@ -125,7 +140,11 @@ public class SwiftLogger {
         //before we process anything, get the time so know exactly when the logging occurred
         let timestamp = NSDate()
         let messages = objectArgs.map({ self._getMessageFromObject($0) }).filter({ $0 != "" })
-        self._formatAndWrite(.Info, timestamp: timestamp, messages: messages)
+        //now that we have all necessary data, send dispatch the work to write
+        //todo: need to figure out how to get a handle on these in case we force a flush to disk, so we can block and wait for these to get done
+//        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0)) {
+            self._formatAndWrite(self._LOGLEVEL_INFO, timestamp: timestamp, messages: messages)
+//        }
     }
     
     private func _getMessageFromObject<T>(o: T) -> String {
@@ -147,11 +166,11 @@ public class SwiftLogger {
     /**
         Prepares a batch of message to be written by formatting them and then writes the batch to the log file.
     
-        - Parameter logLevel: The log level for the batch of messages.
+        - Parameter logLevel: The log level for the batch of messages (_LOGLEVEL).
         - Parameter timestamp: The time at which the logger was called to process a logging event.
         - Parameter messages: The unformatted messages to log.
     */
-    private func _formatAndWrite(logLevel: LogLevelTypes, timestamp: NSDate, messages: [String]) {
+    private func _formatAndWrite(logLevel: String, timestamp: NSDate, messages: [String]) {
         /*EXPECTED FORMAT
         INFO:01/23/16 13:45:123456 PDT
         >this is the first in the batch
@@ -159,7 +178,7 @@ public class SwiftLogger {
         ERROR:01/23/16 13:45:123456 PDT
         >this is the next one but it's an error
         */
-        var clean = "\(logLevel.label):\(dateFormatters._default.stringFromDate(timestamp))\n"
+        var clean = "\(logLevel):\(dateFormatters._default.stringFromDate(timestamp))\n"
         clean += messages.map { ">\($0)" }.joinWithSeparator("\n")
         self._write(clean)
     }
@@ -168,6 +187,10 @@ public class SwiftLogger {
         Writes the message to the current tail
     */
     private func _write(message: String) {
+        if !self.loggingIsActive {
+            debugPrint("SWIFTLOGGER-NOLOG", message)
+            return
+        }
         //append to the log
         //if there's already stuff in the tail, slap a line break in there to break up the messages
         if self._currentLogTail != "" {
@@ -181,11 +204,22 @@ public class SwiftLogger {
         }
     }
     
+    public func flushTailToDisk() {
+        
+    }
+    internal func _flushTailToDisk(manualFlush: Bool) {
+        
+    }
     /**
         Flushes the tail to a file on the disk. Call this directly if the application is about to crash or any other reason you want to guarantee the log info is hardened.
     */
     func flushTailToDisk() {
-        //todo: figure out how to do a mutex lock on this method so that we can prevent clobbering
+        if !self.loggingIsActive {
+            return
+        }
+        //mutex lock this method to prevent multiple calls to this at once
+        //todo: this might need to be semaphore, since we'll need to lock a lot of stuff when get/purge-logs is called
+//        dispatch_once(flush_once_t) {
         if self._currentLogTail == "" {
             return
         }
@@ -195,11 +229,17 @@ public class SwiftLogger {
         //todo: use writeToFile or filemanager? probably filemanager since the other is deprecated. wait, this doesnt appear to be deprecated...
         do {
             try self._currentLogTail.writeToFile(finalPath, atomically: true, encoding: NSUTF8StringEncoding)
-            self._currentLogTail = ""
-            self._nextFileNumber += 1
         } catch {
             debugPrint("SWIFTLOGGER", "failed attempting to write file to a path", error)
+            return
         }
+    
+        self._currentLogTail = ""
+        self._nextFileNumber += 1
+        if self._delegate != nil && self._delegate!.respondsToSelector(Selector("swiftLogger")) {
+            self._delegate!.swiftLogger!(didFlushTailToDisk: true, wasManual: true)
+        }
+//        }
     }
     
     //todo: throw for errors retrieving files? not sure a user would want to handle that. i think i would
@@ -209,6 +249,9 @@ public class SwiftLogger {
         - Returns: a dictionary containing the name of the file as the key and the actual contents as the value. nil is returned if there was a problem getting the files.
     */
     func getLogs() -> [String:String]? {
+        if !self.loggingIsActive {
+            return nil
+        }
         var filesOpt:[String]?
         do {
             filesOpt = try self._fileManager.contentsOfDirectoryAtPath(self._logPath)
@@ -244,6 +287,9 @@ public class SwiftLogger {
         - Parameter filesToPurge: a list of file names to purge, usually provided by the `getLogs()` function. All logs are purged if nil is passed
     */
     func purgeLogs(filesToPurge: [String]?) {
+        if !self.loggingIsActive {
+            return
+        }
         var files:[String]?
         if filesToPurge == nil {
             do {
@@ -276,27 +322,6 @@ public class SwiftLogger {
         }
         /**default logging format: 01/20/16 12:34:56.789 PDT **/
         private static let _default = dateFormatters("MM/dd/yy HH:mm:ss.SSS zzz")
-    }
-    
-    //todo: consider changing this to constants, since we aren't using any other enum functionality
-    private enum LogLevelTypes {
-        case Info
-        case Debug
-        case Warn
-        case Error
-        case Fatal
-        
-        var label: String {
-            get {
-                switch self {
-                case Info:  return "INFO"
-                case Debug: return "DEBG"
-                case Warn:  return "WARN"
-                case Error: return "ERRR"
-                case Fatal: return "FATL"
-                }
-            }
-        }
     }
 }
 
