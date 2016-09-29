@@ -38,7 +38,6 @@ log.purgeLogs()
 
 todo:
 >async
->create a delegate that responds to events like "tailFlushedToDisk, logWrittenToTail" and others, in case someone wants to hook into the events and fire off the bug report automatically
 >figure out how to call a method on application exit/crash etc so we can flush the tail
 >write some stuff to the log on startup? maybe as a diagnostics setting?
 */
@@ -47,7 +46,16 @@ import Foundation
 
 @objc
 public protocol SwiftLoggerDelegate: NSObjectProtocol {
-    optional func swiftLogger(didFlushTailToDisk flushed: Bool, wasManual: Bool)
+    /**
+        Advises the delegate that the current tail has been flushed to disk.
+        - Parameter wasManual: Determines if the flush was caused by a user (true) or by the internals (false)
+    */
+    optional func swiftLogger_didFlushTailToDisk(wasManual: Bool)
+    /**
+        Advises the delegate that a message was written to the tail
+        - Parameter message: The message that was written to the tail
+    */
+    optional func swiftLogger_didWriteLogToTail(message: String)
 }
 
 public class SwiftLogger {
@@ -64,6 +72,8 @@ public class SwiftLogger {
     private var _currentLogTail: String = ""
     /**The next file number that will be used to create log files*/
     private var _nextFileNumber: Int = 1
+    /**Generates the name and file path for the next file that will be written to disk*/
+    private var _nextFileName: String { get { return self._logPath + "/" + self._logFileNamePrefix + String(format: "%09d", self._nextFileNumber) + ".txt" } }
     /**The prefix for files created by the logger*/
     private let _logFileNamePrefix: String = "log_"
     private let _delegate: SwiftLoggerDelegate?
@@ -73,6 +83,15 @@ public class SwiftLogger {
     private let _LOGLEVEL_WARN =     "WARN"
     private let _LOGLEVEL_ERROR =    "ERRR"
     private let _LOGLEVEL_FATAL =    "FATL"
+    
+    /**Queue for asynchronous operations for writing to the tail that will be performed by the logger*/
+//    private let _dispatch_write_queue = dispatch_queue_create("SwiftLogger-Write", nil)
+//    /**Queue for synchronous flushing tasks so we can prevent multiple calls to it*/
+//    private let _dispatch_flush_queue = dispatch_queue_create("SwiftLogger-Flush", nil)
+//    /**Queue for synchronous purging tasks so we can prevent multiple calls to it*/
+//    private let _dispatch_purge_queue = dispatch_queue_create("SwiftLogger-Purge", nil)
+//    private let _dispatch_group = dispatch_group_create()
+    private let _dispatch_queue = dispatch_queue_create("SwiftLogger", nil)
     
     /**
         Creates an instance of the logger
@@ -141,8 +160,7 @@ public class SwiftLogger {
         let timestamp = NSDate()
         let messages = objectArgs.map({ self._getMessageFromObject($0) }).filter({ $0 != "" })
         //now that we have all necessary data, send dispatch the work to write
-        //todo: need to figure out how to get a handle on these in case we force a flush to disk, so we can block and wait for these to get done
-//        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0)) {
+//        dispatch_async(self._dispatch_queue) {
             self._formatAndWrite(self._LOGLEVEL_INFO, timestamp: timestamp, messages: messages)
 //        }
     }
@@ -198,47 +216,45 @@ public class SwiftLogger {
         } else {
             self._currentLogTail += message
         }
+        //let the delegate know it's been written
+        self._delegate?.swiftLogger_didWriteLogToTail?(message)
         //check if we need to flush to disk
         if self._fileSize < self._currentLogTail.utf8.count {
-            self.flushTailToDisk()
+            self._flushTailToDisk(false)
         }
     }
     
+    /**
+        Manually flushes the tail to a file on the disk.
+    */
     public func flushTailToDisk() {
-        
-    }
-    internal func _flushTailToDisk(manualFlush: Bool) {
-        
+        self._flushTailToDisk(true)
     }
     /**
-        Flushes the tail to a file on the disk. Call this directly if the application is about to crash or any other reason you want to guarantee the log info is hardened.
+        Flushes the tail to a file on the disk.
     */
-    func flushTailToDisk() {
+    internal func _flushTailToDisk(manualFlush: Bool) {
         if !self.loggingIsActive {
             return
         }
         //mutex lock this method to prevent multiple calls to this at once
-        //todo: this might need to be semaphore, since we'll need to lock a lot of stuff when get/purge-logs is called
-//        dispatch_once(flush_once_t) {
-        if self._currentLogTail == "" {
-            return
-        }
-        //todo: figure out how to format the number so we have log_000001.txt
-        let finalPath = self._logPath.stringByAppendingString("/\(self._logFileNamePrefix)\(self._nextFileNumber).txt")
-        debugPrint("SWIFTLOGGER", "final write path", finalPath)
-        //todo: use writeToFile or filemanager? probably filemanager since the other is deprecated. wait, this doesnt appear to be deprecated...
-        do {
-            try self._currentLogTail.writeToFile(finalPath, atomically: true, encoding: NSUTF8StringEncoding)
-        } catch {
-            debugPrint("SWIFTLOGGER", "failed attempting to write file to a path", error)
-            return
-        }
-    
-        self._currentLogTail = ""
-        self._nextFileNumber += 1
-        if self._delegate != nil && self._delegate!.respondsToSelector(Selector("swiftLogger")) {
-            self._delegate!.swiftLogger!(didFlushTailToDisk: true, wasManual: true)
-        }
+//        dispatch_sync(self._dispatch_queue) {
+            if self._currentLogTail == "" {
+                return
+            }
+            let finalPath = self._nextFileName
+            debugPrint("SWIFTLOGGER", "final write path", finalPath)
+            do {
+                try self._currentLogTail.writeToFile(finalPath, atomically: true, encoding: NSUTF8StringEncoding)
+            } catch {
+                debugPrint("SWIFTLOGGER", "failed attempting to write file to a path", error)
+                return
+            }
+            //reset the tail and set our next file number
+            self._currentLogTail = ""
+            self._nextFileNumber += 1
+            //let the delegate know the tail has been flushed
+            self._delegate?.swiftLogger_didFlushTailToDisk?(manualFlush)
 //        }
     }
     
@@ -290,25 +306,27 @@ public class SwiftLogger {
         if !self.loggingIsActive {
             return
         }
-        var files:[String]?
-        if filesToPurge == nil {
-            do {
-                files = try self._fileManager.contentsOfDirectoryAtPath(self._logPath)
-                    .filter { $0.hasPrefix(self._logFileNamePrefix) }
-            } catch {
-                debugPrint("SWIFTLOGGER", "failed getting contents of logging directory for purge", self._logPath, error)
+//        dispatch_sync(self._dispatch_queue) {
+            var files:[String]?
+            if filesToPurge == nil {
+                do {
+                    files = try self._fileManager.contentsOfDirectoryAtPath(self._logPath)
+                        .filter { $0.hasPrefix(self._logFileNamePrefix) }
+                } catch {
+                    debugPrint("SWIFTLOGGER", "failed getting contents of logging directory for purge", self._logPath, error)
+                }
             }
-        }
-        guard let fs = files else {
-            return
-        }
-        for file in fs {
-            do {
-                try self._fileManager.removeItemAtPath(self._logPath + "/" + file)
-            } catch {
-                debugPrint("SWIFTLOGGER", "failed purging file at path", self._logPath, "filename", file)
+            guard let fs = files else {
+                return
             }
-        }
+            for file in fs {
+                do {
+                    try self._fileManager.removeItemAtPath(self._logPath + "/" + file)
+                } catch {
+                    debugPrint("SWIFTLOGGER", "failed purging file at path", self._logPath, "filename", file)
+                }
+            }
+//        }
     }
     
     // MARK - utilities

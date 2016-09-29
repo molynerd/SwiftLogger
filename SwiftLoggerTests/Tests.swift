@@ -11,6 +11,7 @@ import XCTest
 
 class SwiftLoggerTests: XCTestCase {
     let log = SwiftLogger()
+    let logsToWrite = 1000
     var randomsUsed = [String]()
     
     override func tearDown() {
@@ -20,8 +21,8 @@ class SwiftLoggerTests: XCTestCase {
     
     /**Writes some simple logs, with single items*/
     func testWriteSingleLog() {
-        for _ in 0...30 {
-            self.log.info("write this to the log: \(self._rand())")
+        for i in 0...logsToWrite {
+            self.log.info("\(i) write this to the log: \(self._rand())")
         }
         //force the logger to flush
         self.log.flushTailToDisk()
@@ -30,8 +31,8 @@ class SwiftLoggerTests: XCTestCase {
     }
     
     func testWriteMultipleLog() {
-        for _ in 0...30 {
-            self.log.info("write these to the log", self._rand(), self._rand())
+        for i in 0...logsToWrite {
+            self.log.info("\(i) write these to the log", self._rand(), self._rand())
         }
         //force the logger to flush
         self.log.flushTailToDisk()
@@ -55,7 +56,12 @@ class SwiftLoggerTests: XCTestCase {
         }
         
         //smash all the logs together
-        let allLog = logs.values.joinWithSeparator("\n")
+        //apparently these aren't in the correct for dictionaries, so we need to loop through the keys, sorted
+        var allLog = ""
+        for key in logs.keys.sort() {
+            allLog += logs[key]!
+            allLog += "\n"
+        }
         
         //make sure the random numbers existed somewhere
         var randomsNotWritten = [String]()
@@ -63,6 +69,24 @@ class SwiftLoggerTests: XCTestCase {
             if !allLog.containsString(str) {
                 randomsNotWritten.append(str)
             }
+        }
+        
+        //make sure that the logs were written in order
+        var lastNumber = -1
+        var split = allLog.componentsSeparatedByString("\n")
+        for i in 0..<split.count {
+            let current = split[i]
+            guard let firstSpace = current.characters.indexOf(" ") else {
+                continue
+            }
+            let charsUntilFirstSpace = current.substringToIndex(firstSpace)
+            //skip the first 2 chars, since it should be this >"
+            let trimmed = charsUntilFirstSpace.substringFromIndex(charsUntilFirstSpace.startIndex.advancedBy(2))
+            guard let num = Int(trimmed) else {
+                continue
+            }
+            XCTAssertEqual(lastNumber + 1, num, "logs written out of order: preceding \(lastNumber + 1), current \(num)")
+            lastNumber += 1
         }
         
         let randomsNotWrittenConcat = randomsNotWritten.joinWithSeparator(",")
