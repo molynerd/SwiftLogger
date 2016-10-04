@@ -61,7 +61,7 @@ protocol SwiftLoggerFlushDelegate: SwiftLoggerDelegate {
         Advises the delegate that the current tail has been flushed to disk.
         - Parameter wasManual: Determines if the flush was caused by a user (true) or by the internals (false)
     */
-    func swiftLogger_didFlushTailToDisk(wasManual: Bool)
+    func swiftLogger(didFlushTailToDisk wasManual: Bool)
 }
 /**Delegate that provides information on the log tail*/
 protocol SwiftLoggerTailDelegate: SwiftLoggerDelegate {
@@ -69,7 +69,7 @@ protocol SwiftLoggerTailDelegate: SwiftLoggerDelegate {
         Advises the delegate that a message was written to the tail
         - Parameter message: The message that was written to the tail
     */
-    func swiftLogger_didWriteLogToTail(message: String)
+    func swiftLogger(didWriteLogToTail message: String)
 }
 
 public class SwiftLogger {
@@ -99,8 +99,8 @@ public class SwiftLogger {
     /*
     DELEGATES
     */
-    private let _flushDelegate: SwiftLoggerFlushDelegate?
-    private let _tailDelegate: SwiftLoggerTailDelegate?
+    var flushDelegate: SwiftLoggerFlushDelegate?
+    var tailDelegate: SwiftLoggerTailDelegate?
     
     /**
         Creates an instance of the logger
@@ -121,14 +121,10 @@ public class SwiftLogger {
         fileSize: Int = 1000) {
             //set the delegates
             if let flusher = delegate as? SwiftLoggerFlushDelegate {
-                self._flushDelegate = flusher
-            } else {
-                self._flushDelegate = nil
+                self.flushDelegate = flusher
             }
             if let tailer = delegate as? SwiftLoggerTailDelegate {
-                self._tailDelegate = tailer
-            } else {
-                self._tailDelegate = nil
+                self.tailDelegate = tailer
             }
             self._writeToDebugPrint = alsoWriteToDebugPrint
             self._fileSize = fileSize
@@ -259,7 +255,7 @@ public class SwiftLogger {
             debugPrint("SWIFTLOGGER-LOG-MESSAGE", message)
         }
         //let the delegate know it's been written
-        self._tailDelegate?.swiftLogger_didWriteLogToTail(message)
+        self.tailDelegate?.swiftLogger(didWriteLogToTail: message)
         //check if we need to flush to disk
         if self._fileSize < self._protected.currentLogTail.utf8.count {
             self._flushTailToDisk(false)
@@ -295,7 +291,7 @@ public class SwiftLogger {
         self._protected.currentLogTail = ""
         self._protected.nextFileNumber += 1
         //let the delegate know the tail has been flushed
-        self._flushDelegate?.swiftLogger_didFlushTailToDisk(manualFlush)
+        self.flushDelegate?.swiftLogger(didFlushTailToDisk: manualFlush)
     }
     
     /**
