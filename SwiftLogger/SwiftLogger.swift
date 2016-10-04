@@ -44,12 +44,12 @@ todo:
 
 import Foundation
 
-enum SwiftLoggerGetLogsError: ErrorType {
+enum SwiftLoggerGetLogsError: Error {
     /**Failed getting contents of logging directory*/
-    case FailedEnumeratingDirectory(error: ErrorType)
+    case failedEnumeratingDirectory(error: Error)
     //todo: get rid of this and use a generic error maybe?
     /**Someone developing SwiftLogger screwed something up. You should never ever see this. Ever.*/
-    case Bug(errorMessage: String)
+    case bug(errorMessage: String)
 }
 
 /**Base class for the delegates*/
@@ -72,29 +72,29 @@ protocol SwiftLoggerTailDelegate: SwiftLoggerDelegate {
     func swiftLogger(didWriteLogToTail message: String)
 }
 
-public class SwiftLogger {
+open class SwiftLogger {
     /**Determines if logging can occur. This is set to false if problems were encountered during initialization*/
     var loggingIsActive: Bool = true
     
     /**NSFileManager singleton instance*/
-    private let _fileManager: NSFileManager = NSFileManager.defaultManager()
+    fileprivate let _fileManager: FileManager = FileManager.default
     /**Logging location*/
-    private let _logPath: String
+    fileprivate let _logPath: String
     /**The size of the tail before writing a disk, in bytes, this is effectively slightly smaller than the size of each file. Once the tail contains exactly or more bytes than specified here, it is written to a file.*/
-    private let _fileSize: Int
+    fileprivate let _fileSize: Int
     /**Generates the name and file path for the next file that will be written to disk*/
-    private var _nextFileName: String { get { return self._logPath + "/" + self._logFileNamePrefix + String(format: "%09d", self._protected.nextFileNumber) + ".txt" } }
+    fileprivate var _nextFileName: String { get { return self._logPath + "/" + self._logFileNamePrefix + String(format: "%09d", self._protected.nextFileNumber) + ".txt" } }
     /**The prefix for files created by the logger*/
-    private let _logFileNamePrefix: String = "log_"
-    private let _writeToDebugPrint: Bool
+    fileprivate let _logFileNamePrefix: String = "log_"
+    fileprivate let _writeToDebugPrint: Bool
     
     /*
     LOCKING
     */
     /**Contains mutable variables that need thread protection*/
-    private let _protected = threadProtected()
+    fileprivate let _protected = threadProtected()
     /**Mutex lock object for preventing read/write operations on log files from happening simultaneously*/
-    private let _logFileLock = NSObject()
+    fileprivate let _logFileLock = NSObject()
     
     /*
     DELEGATES
@@ -107,16 +107,16 @@ public class SwiftLogger {
     
         - Parameter delegate: A delegate to receive messages about what the logger is doing
         - Parameter alsoWriteToDebugPrint: if true, all log messages are also written to debugPrint, denoted by "SWIFTLOGGER-LOG-MESSAGE-MESSAGE"
-        - Parameter directory: The directory in which to save log files. Defaults to `.ApplicationSupportDirectory`.
-        - Parameter domain: The file system domain to search for the directory. Defaults to `.UserDomainMask`.
+        - Parameter directory: The directory in which to save log files. Defaults to `.applicationSupportDirectory`.
+        - Parameter domain: The file system domain to search for the directory. Defaults to `.userDomainMask`.
         - Parameter explodeOnFailureToInit: If true, a fatal error will occur if the initialization fails. Defaults to true assuming that the application is dependent on logging. If this is not the case, simply use false here, and only `debugPrint` will be advise you that no logging will occur, denoted by "SWIFTLOGGER-NOLOG-MESSAGE-MESSAGE".
         - Parameter fileSize: The size of the tail before writing a disk, in bytes, this is effectively the size of each file
     */
     init(
         delegate: SwiftLoggerDelegate? = nil,
         alsoWriteToDebugPrint: Bool = false,
-        directory: NSSearchPathDirectory = .ApplicationSupportDirectory,
-        domain: NSSearchPathDomainMask = .UserDomainMask,
+        directory: FileManager.SearchPathDirectory = .applicationSupportDirectory,
+        domain: FileManager.SearchPathDomainMask = .userDomainMask,
         explodeOnFailureToInit: Bool = true,
         fileSize: Int = 1000) {
             //set the delegates
@@ -129,12 +129,12 @@ public class SwiftLogger {
             self._writeToDebugPrint = alsoWriteToDebugPrint
             self._fileSize = fileSize
             //create the logging directory
-            let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .UserDomainMask, true).first!
-            self._logPath = topDirectory.stringByAppendingPathComponent("SwiftLogger")
-            if !self._fileManager.fileExistsAtPath(self._logPath) {
+            let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .userDomainMask, true).first! as NSString
+            self._logPath = topDirectory.appendingPathComponent("SwiftLogger")
+            if !self._fileManager.fileExists(atPath: self._logPath) {
                 //it would be unfortunate if this blew up, but it will also tell you, immediately, that there's a config problem
                 do {
-                    try self._fileManager.createDirectoryAtPath(self._logPath, withIntermediateDirectories: false, attributes: nil)
+                    try self._fileManager.createDirectory(atPath: self._logPath, withIntermediateDirectories: false, attributes: nil)
                 } catch {
                     debugPrint("SWIFTLOGGER", "failed getting log directory due to", error)
                     if explodeOnFailureToInit {
@@ -149,9 +149,9 @@ public class SwiftLogger {
             //get the name of the last file we wrote so we can get the number
             var lastFile:String?
             do {
-                lastFile = try self._fileManager.contentsOfDirectoryAtPath(self._logPath)
+                lastFile = try self._fileManager.contentsOfDirectory(atPath: self._logPath)
                     .filter { $0.hasPrefix(self._logFileNamePrefix) }
-                    .sort()
+                    .sorted()
                     .last
             } catch {
                 debugPrint("SWIFTLOGGER", "failed getting current contents of logging directory", error)
@@ -162,10 +162,10 @@ public class SwiftLogger {
                     self.loggingIsActive = false
                 }
             }
-            if let lf = lastFile where lf != "" {
+            if let lf = lastFile , lf != "" {
                 let trimmed = lf
-                    .stringByReplacingOccurrencesOfString(self._logFileNamePrefix, withString: "", options: [.CaseInsensitiveSearch, .AnchoredSearch])
-                    .stringByReplacingOccurrencesOfString(".txt", withString: "", options: [.CaseInsensitiveSearch, .AnchoredSearch, .BackwardsSearch])
+                    .replacingOccurrences(of: self._logFileNamePrefix, with: "", options: [.caseInsensitive, .anchored])
+                    .replacingOccurrences(of: ".txt", with: "", options: [.caseInsensitive, .anchored, .backwards])
                 if let i = Int(trimmed) {
                     self._protected.nextFileNumber = i + 1
                 } else {
@@ -175,39 +175,39 @@ public class SwiftLogger {
     }
     
     /**Info level log*/
-    func info<T>(objectArgs: T...) {
+    func info<T>(_ objectArgs: T...) {
         self._parseEntry(self._LOGLEVEL_INFO, objectArgs: objectArgs)
     }
-    func debug<T>(objectArgs: T...) {
+    func debug<T>(_ objectArgs: T...) {
         self._parseEntry(self._LOGLEVEL_DEBUG, objectArgs: objectArgs)
     }
-    func warn<T>(objectArgs: T...) {
+    func warn<T>(_ objectArgs: T...) {
         self._parseEntry(self._LOGLEVEL_WARN, objectArgs: objectArgs)
     }
-    func error<T>(objectArgs: T...) {
+    func error<T>(_ objectArgs: T...) {
         self._parseEntry(self._LOGLEVEL_ERROR, objectArgs: objectArgs)
     }
-    func fatal<T>(objectArgs: T...) {
+    func fatal<T>(_ objectArgs: T...) {
         self._parseEntry(self._LOGLEVEL_FATAL, objectArgs: objectArgs)
     }
     
     //todo: theres a potential to make this func public, so that you could set the log level programmatically, but i'm not sure how to force the coder to use one of the LOGLEVEL constants. i could just do a switch... but i feel like that's kinda lazy and might impact performance
     /**Middle function for logging, all general purpose logging functions filter into this function*/
-    private func _parseEntry<T>(logLevel: String, objectArgs: T...) {
+    fileprivate func _parseEntry<T>(_ logLevel: String, objectArgs: T...) {
         //before we process anything, get the time so know exactly when the logging occurred
-        let timestamp = NSDate()
+        let timestamp = Date()
         let messages = objectArgs.map({ self._getMessageFromObject($0) }).filter({ $0 != "" })
         self._formatAndWrite(self._LOGLEVEL_INFO, timestamp: timestamp, messages: messages)
     }
     
-    private func _getMessageFromObject<T>(o: T) -> String {
+    fileprivate func _getMessageFromObject<T>(_ o: T) -> String {
         if let c = o as? CustomDebugStringConvertible {
             return c.debugDescription
         } else if let c = o as? CustomStringConvertible {
             return c.description
-        } else if let c = o as? Streamable {
+        } else if let c = o as? TextOutputStreamable {
             var targ = String()
-            c.writeTo(&targ)
+            c.write(to: &targ)
             return targ
         } else {
             //if debugprint can, and i cant, well that sux and it needs to be figured out
@@ -223,7 +223,7 @@ public class SwiftLogger {
         - Parameter timestamp: The time at which the logger was called to process a logging event.
         - Parameter messages: The unformatted messages to log.
     */
-    private func _formatAndWrite(logLevel: String, timestamp: NSDate, messages: [String]) {
+    fileprivate func _formatAndWrite(_ logLevel: String, timestamp: Date, messages: [String]) {
         /*EXPECTED FORMAT
         INFO:01/23/16 13:45:123456 PDT
         >this is the first in the batch
@@ -231,15 +231,15 @@ public class SwiftLogger {
         ERROR:01/23/16 13:45:123456 PDT
         >this is the next one but it's an error
         */
-        var clean = "\(logLevel):\(dateFormatters._default.stringFromDate(timestamp))\n"
-        clean += messages.map { ">\($0)" }.joinWithSeparator("\n")
+        var clean = "\(logLevel):\(dateFormatters._default.string(from: timestamp))\n"
+        clean += messages.map { ">\($0)" }.joined(separator: "\n")
         self._write(clean)
     }
     
     /**
         Writes the message to the current tail
     */
-    private func _write(message: String) {
+    fileprivate func _write(_ message: String) {
         if !self.loggingIsActive {
             debugPrint("SWIFTLOGGER-NOLOG-MESSAGE", message)
             return
@@ -267,7 +267,7 @@ public class SwiftLogger {
     
         - Parameter manualFlush: determines if the flush was called by a user (true) or by the internals (false)
     */
-    private func _flushTailToDisk(manualFlush: Bool) {
+    fileprivate func _flushTailToDisk(_ manualFlush: Bool) {
         if !self.loggingIsActive {
             debugPrint("SWIFTLOGGER-NOLOG", "attempted to flush but logging inactive")
             return
@@ -280,7 +280,7 @@ public class SwiftLogger {
         debugPrint("SWIFTLOGGER", "final write path", finalPath)
         do {
             objc_sync_enter(self._logFileLock)
-            try self._protected.currentLogTail.writeToFile(finalPath, atomically: true, encoding: NSUTF8StringEncoding)
+            try self._protected.currentLogTail.write(toFile: finalPath, atomically: true, encoding: String.Encoding.utf8)
             objc_sync_exit(self._logFileLock)
         } catch {
             objc_sync_exit(self._logFileLock)
@@ -310,23 +310,23 @@ public class SwiftLogger {
         objc_sync_enter(self._logFileLock)
         var filesOpt:[String]?
         do {
-            filesOpt = try self._fileManager.contentsOfDirectoryAtPath(self._logPath)
+            filesOpt = try self._fileManager.contentsOfDirectory(atPath: self._logPath)
                 .filter { $0.hasPrefix(self._logFileNamePrefix) }
-                .sort()
+                .sorted()
         } catch {
             debugPrint("SWIFTLOGGER", "failed getting contents of logging directory", self._logPath, error)
             objc_sync_exit(self._logFileLock)
-            throw SwiftLoggerGetLogsError.FailedEnumeratingDirectory(error: error)
+            throw SwiftLoggerGetLogsError.failedEnumeratingDirectory(error: error)
         }
         guard let files = filesOpt else {
             //this should never happen. if someone sees this, we've really f'd this method
             objc_sync_exit(self._logFileLock)
-            throw SwiftLoggerGetLogsError.Bug(errorMessage: "Files optional could not be unwrapped")
+            throw SwiftLoggerGetLogsError.bug(errorMessage: "Files optional could not be unwrapped")
         }
         var logs = [String:String]()
         for file in files {
-            if let dataContents = self._fileManager.contentsAtPath(self._logPath + "/" + file) {
-                if let contents = String(data: dataContents, encoding: NSUTF8StringEncoding) {
+            if let dataContents = self._fileManager.contents(atPath: self._logPath + "/" + file) {
+                if let contents = String(data: dataContents, encoding: String.Encoding.utf8) {
                     logs[file] = contents
                 } else {
                     debugPrint("SWIFTLOGGER", "failed encoding data to utf8", self._logPath, file)
@@ -346,7 +346,7 @@ public class SwiftLogger {
     
         - Parameter filesToPurge: a list of file names to purge, usually provided by the `getLogs()` function. All logs are purged if nil is passed
     */
-    func purgeLogs(filesToPurge: [String]?) {
+    func purgeLogs(_ filesToPurge: [String]?) {
         if !self.loggingIsActive {
             return
         }
@@ -355,7 +355,7 @@ public class SwiftLogger {
         var files:[String]?
         if filesToPurge == nil {
             do {
-                files = try self._fileManager.contentsOfDirectoryAtPath(self._logPath)
+                files = try self._fileManager.contentsOfDirectory(atPath: self._logPath)
                     .filter { $0.hasPrefix(self._logFileNamePrefix) }
             } catch {
                 debugPrint("SWIFTLOGGER", "failed getting contents of logging directory for purge", self._logPath, error)
@@ -367,12 +367,12 @@ public class SwiftLogger {
         }
         for file in fs {
             let fileName = self._logPath + "/" + file
-            if !self._fileManager.fileExistsAtPath(fileName) {
+            if !self._fileManager.fileExists(atPath: fileName) {
                 objc_sync_exit(self._logFileLock)
                 return
             }
             do {
-                try self._fileManager.removeItemAtPath(fileName)
+                try self._fileManager.removeItem(atPath: fileName)
             } catch {
                 debugPrint("SWIFTLOGGER", "failed purging file at path", self._logPath, "filename", file)
             }
@@ -390,13 +390,13 @@ public class SwiftLogger {
     
     // MARK - utilities
     //log levels. you might be asking... why ERRR and FATL? it's because im kinda OCD about how the log looks and this makes everything line up vertically.
-    private let _LOGLEVEL_INFO =     "INFO"
-    private let _LOGLEVEL_DEBUG =    "DEBG"
-    private let _LOGLEVEL_WARN =     "WARN"
-    private let _LOGLEVEL_ERROR =    "ERRR"
-    private let _LOGLEVEL_FATAL =    "FATL"
+    fileprivate let _LOGLEVEL_INFO =     "INFO"
+    fileprivate let _LOGLEVEL_DEBUG =    "DEBG"
+    fileprivate let _LOGLEVEL_WARN =     "WARN"
+    fileprivate let _LOGLEVEL_ERROR =    "ERRR"
+    fileprivate let _LOGLEVEL_FATAL =    "FATL"
     
-    private class dateFormatters: NSDateFormatter {
+    fileprivate class dateFormatters: DateFormatter {
         init(_ format: String) {
             super.init()
             self.dateFormat = format
@@ -405,15 +405,14 @@ public class SwiftLogger {
             fatalError("init(coder:) has not been implemented")
         }
         /**default logging format: 01/20/16 12:34:56.789 PDT **/
-        private static let _default = dateFormatters("MM/dd/yy HH:mm:ss.SSS zzz")
+        fileprivate static let _default = dateFormatters("MM/dd/yy HH:mm:ss.SSS zzz")
     }
     
-    //todo: this could be written a bit better, in that, SwiftLogger can still get to the private vars inside the thread protection
     /**Class that contains mutable properties that need to be guaranteed thread safety*/
-    private class threadProtected {
+    fileprivate class threadProtected {
         private var _currentLogTailLock = pthread_rwlock_t()
         private var _currentLogTail = ""
-        var currentLogTail: String {
+        fileprivate var currentLogTail: String {
             get {
                 var data = ""
                 self._with(&self._currentLogTailLock) {
@@ -430,7 +429,7 @@ public class SwiftLogger {
         
         private var _nextFileNumberLock = pthread_rwlock_t()
         private var _nextFileNumber: Int = 0
-        var nextFileNumber: Int {
+        fileprivate var nextFileNumber: Int {
             get {
                 var data = 0
                 self._with(&self._nextFileNumberLock) {
@@ -451,13 +450,13 @@ public class SwiftLogger {
         }
         
         /**Thread safety method for accessing shared resource with multiple concurrent readers*/
-        private func _with(rwlock: UnsafeMutablePointer<pthread_rwlock_t>, f: Void -> Void) {
+        private func _with(_ rwlock: UnsafeMutablePointer<pthread_rwlock_t>, f: (Void) -> Void) {
             pthread_rwlock_rdlock(rwlock)
             f()
             pthread_rwlock_unlock(rwlock)
         }
         /**Thread safety method for mutating a shared resource with a single writer*/
-        private func _with_write(rwlock: UnsafeMutablePointer<pthread_rwlock_t>, f: Void -> Void) {
+        private func _with_write(_ rwlock: UnsafeMutablePointer<pthread_rwlock_t>, f: (Void) -> Void) {
             pthread_rwlock_wrlock(rwlock)
             f()
             pthread_rwlock_unlock(rwlock)
