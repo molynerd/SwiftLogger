@@ -47,23 +47,29 @@ import Foundation
 enum SwiftLoggerGetLogsError: ErrorType {
     /**Failed getting contents of logging directory*/
     case FailedEnumeratingDirectory(error: ErrorType)
+    //todo: get rid of this and use a generic error maybe?
     /**Someone developing SwiftLogger screwed something up. You should never ever see this. Ever.*/
     case Bug(errorMessage: String)
 }
 
-//todo: can this be written without objc declaration?
-@objc
-public protocol SwiftLoggerDelegate {
+/**Base class for the delegates*/
+protocol SwiftLoggerDelegate {
+}
+/**Delegate that provides information on flushing tasks (tail being written to disk)*/
+protocol SwiftLoggerFlushDelegate: SwiftLoggerDelegate {
     /**
         Advises the delegate that the current tail has been flushed to disk.
         - Parameter wasManual: Determines if the flush was caused by a user (true) or by the internals (false)
     */
-    optional func swiftLogger_didFlushTailToDisk(wasManual: Bool)
+    func swiftLogger_didFlushTailToDisk(wasManual: Bool)
+}
+/**Delegate that provides information on the log tail*/
+protocol SwiftLoggerTailDelegate: SwiftLoggerDelegate {
     /**
         Advises the delegate that a message was written to the tail
         - Parameter message: The message that was written to the tail
     */
-    optional func swiftLogger_didWriteLogToTail(message: String)
+    func swiftLogger_didWriteLogToTail(message: String)
 }
 
 public class SwiftLogger {
@@ -80,15 +86,21 @@ public class SwiftLogger {
     private var _nextFileName: String { get { return self._logPath + "/" + self._logFileNamePrefix + String(format: "%09d", self._protected.nextFileNumber) + ".txt" } }
     /**The prefix for files created by the logger*/
     private let _logFileNamePrefix: String = "log_"
-    private let _delegate: SwiftLoggerDelegate?
     private let _writeToDebugPrint: Bool
     
-//    /**Queue for mutex locking so we can guarantee some thread-safety*/
-//    private let _dispatch_mutex = dispatch_queue_create("SwiftLogger-Mutex", nil)
+    /*
+    LOCKING
+    */
     /**Contains mutable variables that need thread protection*/
     private let _protected = threadProtected()
     /**Mutex lock object for preventing read/write operations on log files from happening simultaneously*/
     private let _logFileLock = NSObject()
+    
+    /*
+    DELEGATES
+    */
+    private let _flushDelegate: SwiftLoggerFlushDelegate?
+    private let _tailDelegate: SwiftLoggerTailDelegate?
     
     /**
         Creates an instance of the logger
@@ -107,7 +119,17 @@ public class SwiftLogger {
         domain: NSSearchPathDomainMask = .UserDomainMask,
         explodeOnFailureToInit: Bool = true,
         fileSize: Int = 1000) {
-            self._delegate = delegate
+            //set the delegates
+            if let flusher = delegate as? SwiftLoggerFlushDelegate {
+                self._flushDelegate = flusher
+            } else {
+                self._flushDelegate = nil
+            }
+            if let tailer = delegate as? SwiftLoggerTailDelegate {
+                self._tailDelegate = tailer
+            } else {
+                self._tailDelegate = nil
+            }
             self._writeToDebugPrint = alsoWriteToDebugPrint
             self._fileSize = fileSize
             //create the logging directory
@@ -237,7 +259,7 @@ public class SwiftLogger {
             debugPrint("SWIFTLOGGER-LOG-MESSAGE", message)
         }
         //let the delegate know it's been written
-        self._delegate?.swiftLogger_didWriteLogToTail?(message)
+        self._tailDelegate?.swiftLogger_didWriteLogToTail(message)
         //check if we need to flush to disk
         if self._fileSize < self._protected.currentLogTail.utf8.count {
             self._flushTailToDisk(false)
@@ -273,7 +295,7 @@ public class SwiftLogger {
         self._protected.currentLogTail = ""
         self._protected.nextFileNumber += 1
         //let the delegate know the tail has been flushed
-        self._delegate?.swiftLogger_didFlushTailToDisk?(manualFlush)
+        self._flushDelegate?.swiftLogger_didFlushTailToDisk(manualFlush)
     }
     
     /**
@@ -284,6 +306,7 @@ public class SwiftLogger {
     */
     func getLogs() throws -> [String:String] {
         if !self.loggingIsActive {
+
             debugPrint("SWIFTLOGGER-NOLOG", "attempted to get logs but logging inactive")
             return [String:String]()
         }
@@ -361,6 +384,7 @@ public class SwiftLogger {
         objc_sync_exit(self._logFileLock)
     }
     
+    //todo: probably need to update this documentation, depending on whether we actually do async stuff
     /**
         Guarantees all log data is flushed to disk by blocking the current thread until completion
     */

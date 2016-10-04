@@ -96,11 +96,8 @@ class SwiftLoggerTests: XCTestCase {
     *UTILITIES
     */
     
-    class DummyDelegate: SwiftLoggerDelegate {
-        @objc func swiftLogger_didFlushTailToDisk(wasManual: Bool) {
-            
-        }
-        @objc func swiftLogger_didWriteLogToTail(message: String) {
+    class TailDelegate: SwiftLoggerTailDelegate {
+        func swiftLogger_didWriteLogToTail(message: String) {
             
         }
     }
