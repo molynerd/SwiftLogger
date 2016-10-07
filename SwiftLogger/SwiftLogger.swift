@@ -21,25 +21,12 @@
 //  THE SOFTWARE.
 
 /*
-HOPES
-
-//step 1: create a singleton instance
-static let log = SwiftLogger(`optionalconfig`)
-
-//step 2: log stuff
-log.info("message")         info log
-log.debug("message")
-
-//step 3: read the logs
-log.getLogs()
-
-//step 4: purge the logs
-log.purgeLogs()
-
 todo:
 >documentation: advise user to put shutdown method in on-crash or on-exit area of app
->write some stuff to the log on startup? maybe as a diagnostics setting?
->tests for delegate
+>max storage size settings
+>test logging complex objects
+>consider adding formatter or option for breaking between separate logging items within single log
+>consider changing init to take in a class that will allow for easier construction
 */
 
 import Foundation
@@ -87,6 +74,8 @@ open class SwiftLogger {
     /**The prefix for files created by the logger*/
     fileprivate let _logFileNamePrefix: String = "log_"
     fileprivate let _writeToDebugPrint: Bool
+    /**The format to use when writing to the log*/
+    fileprivate let _logFormat: String
     
     /*
     LOCKING
@@ -111,6 +100,11 @@ open class SwiftLogger {
         - Parameter domain: The file system domain to search for the directory. Defaults to `.userDomainMask`.
         - Parameter explodeOnFailureToInit: If true, a fatal error will occur if the initialization fails. Defaults to true assuming that the application is dependent on logging. If this is not the case, simply use false here, and only `debugPrint` will be advise you that no logging will occur, denoted by "SWIFTLOGGER-NOLOG-MESSAGE-MESSAGE".
         - Parameter fileSize: The size of the tail before writing a disk, in bytes, this is effectively the size of each file
+        - Parameter logFormat: The format to use when logging. If nil, the default format is used. The following terms are recognized
+            {level}     The log level
+            {date}      The date the message was committed
+            {time}      The time the message was committed
+            {timezone}  The timezone of the date the message was committed
     */
     init(
         delegate: SwiftLoggerDelegate? = nil,
@@ -118,7 +112,8 @@ open class SwiftLogger {
         directory: FileManager.SearchPathDirectory = .applicationSupportDirectory,
         domain: FileManager.SearchPathDomainMask = .userDomainMask,
         explodeOnFailureToInit: Bool = true,
-        fileSize: Int = 1000) {
+        fileSize: Int = 1000,
+        logFormat: String? = nil) {
             //set the delegates
             if let flusher = delegate as? SwiftLoggerFlushDelegate {
                 self.flushDelegate = flusher
@@ -128,6 +123,7 @@ open class SwiftLogger {
             }
             self._writeToDebugPrint = alsoWriteToDebugPrint
             self._fileSize = fileSize
+            self._logFormat = logFormat ?? "{level}:{date} {time} {timezone}\n"
             //create the logging directory
             let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .userDomainMask, true).first! as NSString
             self._logPath = topDirectory.appendingPathComponent("SwiftLogger")
@@ -175,32 +171,33 @@ open class SwiftLogger {
     }
     
     /**Info level log*/
-    func info<T>(_ objectArgs: T...) {
+    func info(_ objectArgs: Any...) {
         self._parseEntry(self._LOGLEVEL_INFO, objectArgs: objectArgs)
     }
-    func debug<T>(_ objectArgs: T...) {
+    func debug(_ objectArgs: Any...) {
         self._parseEntry(self._LOGLEVEL_DEBUG, objectArgs: objectArgs)
     }
-    func warn<T>(_ objectArgs: T...) {
+    func warn(_ objectArgs: Any...) {
         self._parseEntry(self._LOGLEVEL_WARN, objectArgs: objectArgs)
     }
-    func error<T>(_ objectArgs: T...) {
+    func error(_ objectArgs: Any...) {
         self._parseEntry(self._LOGLEVEL_ERROR, objectArgs: objectArgs)
     }
-    func fatal<T>(_ objectArgs: T...) {
+    func fatal(_ objectArgs: Any...) {
         self._parseEntry(self._LOGLEVEL_FATAL, objectArgs: objectArgs)
     }
     
     //todo: theres a potential to make this func public, so that you could set the log level programmatically, but i'm not sure how to force the coder to use one of the LOGLEVEL constants. i could just do a switch... but i feel like that's kinda lazy and might impact performance
+    //changed the objectArgs param here to an from a variadic param otherwise it will be a multi-dimensional array from the info/debug.etc call, but the compile isn't smart enough to know that will happen and consider it a single-dim array. oi.
     /**Middle function for logging, all general purpose logging functions filter into this function*/
-    fileprivate func _parseEntry<T>(_ logLevel: String, objectArgs: T...) {
+    fileprivate func _parseEntry(_ logLevel: String, objectArgs: [Any]) {
         //before we process anything, get the time so know exactly when the logging occurred
         let timestamp = Date()
         let messages = objectArgs.map({ self._getMessageFromObject($0) }).filter({ $0 != "" })
         self._formatAndWrite(self._LOGLEVEL_INFO, timestamp: timestamp, messages: messages)
     }
     
-    fileprivate func _getMessageFromObject<T>(_ o: T) -> String {
+    fileprivate func _getMessageFromObject(_ o: Any) -> String {
         if let c = o as? CustomDebugStringConvertible {
             return c.debugDescription
         } else if let c = o as? CustomStringConvertible {
@@ -231,7 +228,11 @@ open class SwiftLogger {
         ERROR:01/23/16 13:45:123456 PDT
         >this is the next one but it's an error
         */
-        var clean = "\(logLevel):\(dateFormatters._default.string(from: timestamp))\n"
+        var clean = self._logFormat
+            .replacingOccurrences(of: "{level}", with: logLevel)
+            .replacingOccurrences(of: "{date}", with: dateFormatters._date.string(from: timestamp))
+            .replacingOccurrences(of: "{time}", with: dateFormatters._time.string(from: timestamp))
+            .replacingOccurrences(of: "{timezone}", with: dateFormatters._zone.string(from: timestamp))
         clean += messages.map { ">\($0)" }.joined(separator: "\n")
         self._write(clean)
     }
@@ -406,6 +407,9 @@ open class SwiftLogger {
         }
         /**default logging format: 01/20/16 12:34:56.789 PDT **/
         fileprivate static let _default = dateFormatters("MM/dd/yy HH:mm:ss.SSS zzz")
+        fileprivate static let _date = dateFormatters("MM/dd/yy")
+        fileprivate static let _time = dateFormatters("HH:mm:ss.SSS")
+        fileprivate static let _zone = dateFormatters("zzz")
     }
     
     /**Class that contains mutable properties that need to be guaranteed thread safety*/
