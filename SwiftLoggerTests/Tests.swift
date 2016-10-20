@@ -15,6 +15,8 @@ class SwiftLoggerTests: XCTestCase {
     var randomsUsed = [String]()
     
     override func setUp() {
+        //reset the logger instance to default
+        log = SwiftLogger()
         log.purgeLogs(nil)
         log.flushDelegate = nil
         log.tailDelegate = nil
@@ -86,6 +88,10 @@ class SwiftLoggerTests: XCTestCase {
             self.log.info("\(i) write these to the log", self._rand(), self._rand())
         }
         self._validate(true)
+    }
+    
+    func testStorageLimit() {
+        //todo: implement test. this will be a hell of a lot easier if we get class to pass in as a constructor for the logger
     }
     
     /*
@@ -167,8 +173,6 @@ class SwiftLoggerTests: XCTestCase {
             logs = try log.getLogs()
         } catch SwiftLoggerGetLogsError.failedEnumeratingDirectory(let error) {
             XCTFail(String(describing: error))
-        } catch SwiftLoggerGetLogsError.bug(let errorMessage) {
-            XCTFail(errorMessage)
         } catch {
             XCTFail("unknown getlogs error")
         }

@@ -23,9 +23,7 @@
 /*
 todo:
 >documentation: advise user to put shutdown method in on-crash or on-exit area of app
->max storage size settings
 >test logging complex objects
->consider adding formatter or option for breaking between separate logging items within single log
 >consider changing init to take in a class that will allow for easier construction
 */
 
@@ -34,9 +32,6 @@ import Foundation
 enum SwiftLoggerGetLogsError: Error {
     /**Failed getting contents of logging directory*/
     case failedEnumeratingDirectory(error: Error)
-    //todo: get rid of this and use a generic error maybe?
-    /**Someone developing SwiftLogger screwed something up. You should never ever see this. Ever.*/
-    case bug(errorMessage: String)
 }
 
 /**Base class for the delegates*/
@@ -68,11 +63,14 @@ open class SwiftLogger {
     /**Logging location*/
     fileprivate let _logPath: String
     /**The size of the tail before writing a disk, in bytes, this is effectively slightly smaller than the size of each file. Once the tail contains exactly or more bytes than specified here, it is written to a file.*/
-    fileprivate let _fileSize: Int
+    fileprivate let _fileSize: UInt
+    /**The maximum size of storage for all logs, in bytes. If this value is set, the logger will start deleting older files, in favor of newer ones, when the maximum is met.*/
+    fileprivate let _maxStorageSize: UInt64?
     /**Generates the name and file path for the next file that will be written to disk*/
     fileprivate var _nextFileName: String { get { return self._logPath + "/" + self._logFileNamePrefix + String(format: "%09d", self._protected.nextFileNumber) + ".txt" } }
     /**The prefix for files created by the logger*/
     fileprivate let _logFileNamePrefix: String = "log_"
+    /**If true, logging messages are written to the debugPrint output as well.*/
     fileprivate let _writeToDebugPrint: Bool
     /**The format to use when writing to the log*/
     fileprivate let _logFormat: String
@@ -99,7 +97,7 @@ open class SwiftLogger {
         - Parameter directory: The directory in which to save log files. Defaults to `.applicationSupportDirectory`.
         - Parameter domain: The file system domain to search for the directory. Defaults to `.userDomainMask`.
         - Parameter explodeOnFailureToInit: If true, a fatal error will occur if the initialization fails. Defaults to true assuming that the application is dependent on logging. If this is not the case, simply use false here, and only `debugPrint` will be advise you that no logging will occur, denoted by "SWIFTLOGGER-NOLOG-MESSAGE-MESSAGE".
-        - Parameter fileSize: The size of the tail before writing a disk, in bytes, this is effectively the size of each file
+        - Parameter fileSize: The size of the tail before writing to disk, in bytes, this is effectively the size of each file
         - Parameter logFormat: The format to use when logging. If nil, the default format is used. The following terms are recognized
             {level}     The log level
             {date}      The date the message was committed
@@ -112,62 +110,59 @@ open class SwiftLogger {
         directory: FileManager.SearchPathDirectory = .applicationSupportDirectory,
         domain: FileManager.SearchPathDomainMask = .userDomainMask,
         explodeOnFailureToInit: Bool = true,
-        fileSize: Int = 1000,
+        fileSize: UInt = 1000,
+        maxFileSize: UInt64? = nil,
         logFormat: String? = nil) {
-            //set the delegates
-            if let flusher = delegate as? SwiftLoggerFlushDelegate {
-                self.flushDelegate = flusher
-            }
-            if let tailer = delegate as? SwiftLoggerTailDelegate {
-                self.tailDelegate = tailer
-            }
-            self._writeToDebugPrint = alsoWriteToDebugPrint
-            self._fileSize = fileSize
-            self._logFormat = logFormat ?? "{level}:{date} {time} {timezone}\n"
-            //create the logging directory
-            let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .userDomainMask, true).first! as NSString
-            self._logPath = topDirectory.appendingPathComponent("SwiftLogger")
-            if !self._fileManager.fileExists(atPath: self._logPath) {
-                //it would be unfortunate if this blew up, but it will also tell you, immediately, that there's a config problem
-                do {
-                    try self._fileManager.createDirectory(atPath: self._logPath, withIntermediateDirectories: false, attributes: nil)
-                } catch {
-                    debugPrint("SWIFTLOGGER", "failed getting log directory due to", error)
-                    if explodeOnFailureToInit {
-                        fatalError("SWIFTLOGGER failed getting log directory due to: \(error)")
-                    } else {
-                        debugPrint("SWIFTLOGGER", "no logging will occur, due to the failure above.")
-                        self.loggingIsActive = false
-                    }
-                    return
-                }
-            }
-            //get the name of the last file we wrote so we can get the number
-            var lastFile:String?
+        self.flushDelegate = delegate as? SwiftLoggerFlushDelegate
+        self.tailDelegate = delegate as? SwiftLoggerTailDelegate
+        self._writeToDebugPrint = alsoWriteToDebugPrint
+        self._fileSize = fileSize
+        self._maxStorageSize = maxFileSize
+        self._logFormat = logFormat ?? "{level}:{date} {time} {timezone}\n"
+        //create the logging directory
+        let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .userDomainMask, true).first! as NSString
+        self._logPath = topDirectory.appendingPathComponent("SwiftLogger")
+        if !self._fileManager.fileExists(atPath: self._logPath) {
+            //it would be unfortunate if this blew up, but it will also tell you, immediately, that there's a config problem
             do {
-                lastFile = try self._fileManager.contentsOfDirectory(atPath: self._logPath)
-                    .filter { $0.hasPrefix(self._logFileNamePrefix) }
-                    .sorted()
-                    .last
+                try self._fileManager.createDirectory(atPath: self._logPath, withIntermediateDirectories: false, attributes: nil)
             } catch {
-                debugPrint("SWIFTLOGGER", "failed getting current contents of logging directory", error)
+                debugPrint("SWIFTLOGGER", "failed getting log directory due to", error)
                 if explodeOnFailureToInit {
-                    fatalError("SWIFTLOGGER failed getting current contents of logging directory due to: \(error)")
+                    fatalError("SWIFTLOGGER failed getting log directory due to: \(error)")
                 } else {
                     debugPrint("SWIFTLOGGER", "no logging will occur, due to the failure above.")
                     self.loggingIsActive = false
                 }
+                return
             }
-            if let lf = lastFile , lf != "" {
-                let trimmed = lf
-                    .replacingOccurrences(of: self._logFileNamePrefix, with: "", options: [.caseInsensitive, .anchored])
-                    .replacingOccurrences(of: ".txt", with: "", options: [.caseInsensitive, .anchored, .backwards])
-                if let i = Int(trimmed) {
-                    self._protected.nextFileNumber = i + 1
-                } else {
-                    debugPrint("SWIFTLOGGER", "failed parsing last log file number", lf, "trimmed", trimmed)
-                }
+        }
+        //get the name of the last file we wrote so we can get the number
+        var lastFile: String?
+        do {
+            lastFile = try self._fileManager.contentsOfDirectory(atPath: self._logPath)
+                .filter { $0.hasPrefix(self._logFileNamePrefix) }
+                .sorted()
+                .last
+        } catch {
+            debugPrint("SWIFTLOGGER", "failed getting current contents of logging directory", error)
+            if explodeOnFailureToInit {
+                fatalError("SWIFTLOGGER failed getting current contents of logging directory due to: \(error)")
+            } else {
+                debugPrint("SWIFTLOGGER", "no logging will occur, due to the failure above.")
+                self.loggingIsActive = false
             }
+        }
+        if let lf = lastFile, lf != "" {
+            let trimmed = lf
+                .replacingOccurrences(of: self._logFileNamePrefix, with: "", options: [.caseInsensitive, .anchored])
+                .replacingOccurrences(of: ".txt", with: "", options: [.caseInsensitive, .anchored, .backwards])
+            if let i = Int(trimmed) {
+                self._protected.nextFileNumber = i + 1
+            } else {
+                debugPrint("SWIFTLOGGER", "failed parsing last log file number", lf, "trimmed", trimmed)
+            }
+        }
     }
     
     /**Info level log*/
@@ -237,9 +232,7 @@ open class SwiftLogger {
         self._write(clean)
     }
     
-    /**
-        Writes the message to the current tail
-    */
+    /**Writes the message to the current tail*/
     fileprivate func _write(_ message: String) {
         if !self.loggingIsActive {
             debugPrint("SWIFTLOGGER-NOLOG-MESSAGE", message)
@@ -258,7 +251,7 @@ open class SwiftLogger {
         //let the delegate know it's been written
         self.tailDelegate?.swiftLogger(didWriteLogToTail: message)
         //check if we need to flush to disk
-        if self._fileSize < self._protected.currentLogTail.utf8.count {
+        if UInt(self._protected.currentLogTail.utf8.count) > self._fileSize {
             self._flushTailToDisk(false)
         }
     }
@@ -281,13 +274,14 @@ open class SwiftLogger {
         debugPrint("SWIFTLOGGER", "final write path", finalPath)
         do {
             objc_sync_enter(self._logFileLock)
+            defer { objc_sync_exit(self._logFileLock) }
             try self._protected.currentLogTail.write(toFile: finalPath, atomically: true, encoding: String.Encoding.utf8)
-            objc_sync_exit(self._logFileLock)
         } catch {
-            objc_sync_exit(self._logFileLock)
             debugPrint("SWIFTLOGGER", "failed attempting to write file to a path", error)
             return
         }
+        //now that we've written the file, check if we need to do some cleanup
+        self._applyStorageLimit()
         //reset the tail and set our next file number
         self._protected.currentLogTail = ""
         self._protected.nextFileNumber += 1
@@ -295,49 +289,103 @@ open class SwiftLogger {
         self.flushDelegate?.swiftLogger(didFlushTailToDisk: manualFlush)
     }
     
+    /**Checks if the maximum storage limit has been reached, and if so, deletes old files*/
+    fileprivate func _applyStorageLimit() {
+        //todo: now that we have this, create a new delegate that hooks into files we're about to delete
+        //todo: might need to change delegate to list<delegates>
+        //no max storage size? dont do anything
+        guard let max = self._maxStorageSize else {
+            return
+        }
+        //get all the logs and check the content size
+        guard let logFiles = try? self._getLogFileNames() else {
+            debugPrint("SWIFTLOGGER", "attempted to apply storage limit, but couldn't get file names")
+            return
+        }
+        //combination of filename and size so we can decide how many and which files to delete
+        var sizes = [String:UInt64]()
+        //thread-safety: make sure this is only ever called once at a time, and only one of reading/writing logs should ever be executing at once
+        objc_sync_enter(self._logFileLock)
+        for file in logFiles {
+            let attributes: [FileAttributeKey:Any]
+            do {
+                attributes = try self._fileManager.attributesOfItem(atPath: self._logPath + "/" + file)
+            } catch {
+                debugPrint("SWIFTLOGGER", "failed getting file attributes to check size", error)
+                continue
+            }
+            if let size = attributes[FileAttributeKey.size] as? UInt64 {
+                sizes[file] = size
+            }
+        }
+        objc_sync_exit(self._logFileLock)
+        //get the overflow which will tell us how many to kill
+        var overflow = sizes.values.reduce(0,+) - max
+        var fileIndexToDelete = 0
+        while overflow > 0 && fileIndexToDelete < logFiles.count {
+            //delete a file, one a time, until we don't have an overflow
+            let fileName = logFiles[fileIndexToDelete]
+            //thread-safety: make sure this is only ever called once at a time, and only one of reading/writing logs should ever be executing at once
+            objc_sync_enter(self._logFileLock)
+            defer { objc_sync_exit(self._logFileLock) }
+            do {
+                try self._fileManager.removeItem(atPath: self._logPath + "/" + fileName)
+                overflow -= sizes[fileName]!
+                fileIndexToDelete += 1
+            } catch {
+                debugPrint("SWIFTLOGGER", "failed deleting file to maintain file limit")
+            }
+        }
+    }
+    
     /**
         Gets all log files.
     
         - Returns: a dictionary containing the name of the file as the key and the actual contents as the value.
-        - Throws: `SwiftLoggerGetLogsError.FailedEnumeratingDirectory(ErrorType)` if there was an issue getting the contents of the logging directory, includes the error thrown by the file manager. `SwiftLoggerGetLogsError.Bug(String)` if something seriously weird happens.
+        - Throws: `SwiftLoggerGetLogsError.FailedEnumeratingDirectory(ErrorType)` if there was an issue getting the contents of the logging directory, includes the error thrown by the file manager.
     */
     func getLogs() throws -> [String:String] {
         if !self.loggingIsActive {
-
-            debugPrint("SWIFTLOGGER-NOLOG", "attempted to get logs but logging inactive")
+            debugPrint("SWIFTLOGGER-NOLOG", "attempted to get logs but logging is inactive")
             return [String:String]()
         }
+        var logs = [String:String]()
+        //bubble up the exception if one is thrown
+        let files = try self._getLogFileNames()
         //thread-safety: make sure this is only ever called once at a time, and only one of reading/writing logs should ever be executing at once
         objc_sync_enter(self._logFileLock)
-        var filesOpt:[String]?
+        defer { objc_sync_exit(self._logFileLock) }
+        for file in files {
+            guard let dataContents = self._fileManager.contents(atPath: self._logPath + "/" + file) else {
+                debugPrint("SWIFTLOGGER", "failed getting contents of file at path", self._logPath, file)
+                continue
+            }
+            guard let contents = String(data: dataContents, encoding: String.Encoding.utf8) else {
+                debugPrint("SWIFTLOGGER", "failed encoding data to utf8", self._logPath, file)
+                continue
+            }
+            logs[file] = contents
+        }
+        return logs
+    }
+    
+    /**
+        Gets the names of all logs files, in order of creation
+     
+        - Throws: `SwiftLoggerGetLogsError.FailedEnumeratingDirectory(ErrorType)` if there was an issue getting the contents of the logging directory, includes the error thrown by the file manager.
+     */
+    fileprivate func _getLogFileNames() throws -> [String] {
+        //thread-safety: make sure this is only ever called once at a time, and only one of reading/writing logs should ever be executing at once
+        objc_sync_enter(self._logFileLock)
+        defer { objc_sync_exit(self._logFileLock) }
         do {
-            filesOpt = try self._fileManager.contentsOfDirectory(atPath: self._logPath)
+            return try self._fileManager.contentsOfDirectory(atPath: self._logPath)
                 .filter { $0.hasPrefix(self._logFileNamePrefix) }
                 .sorted()
         } catch {
             debugPrint("SWIFTLOGGER", "failed getting contents of logging directory", self._logPath, error)
-            objc_sync_exit(self._logFileLock)
             throw SwiftLoggerGetLogsError.failedEnumeratingDirectory(error: error)
         }
-        guard let files = filesOpt else {
-            //this should never happen. if someone sees this, we've really f'd this method
-            objc_sync_exit(self._logFileLock)
-            throw SwiftLoggerGetLogsError.bug(errorMessage: "Files optional could not be unwrapped")
-        }
-        var logs = [String:String]()
-        for file in files {
-            if let dataContents = self._fileManager.contents(atPath: self._logPath + "/" + file) {
-                if let contents = String(data: dataContents, encoding: String.Encoding.utf8) {
-                    logs[file] = contents
-                } else {
-                    debugPrint("SWIFTLOGGER", "failed encoding data to utf8", self._logPath, file)
-                }
-            } else {
-                debugPrint("SWIFTLOGGER", "failed getting contents of file at path", self._logPath, file)
-            }
-        }
-        objc_sync_exit(self._logFileLock)
-        return logs
     }
     
     /**
@@ -353,23 +401,22 @@ open class SwiftLogger {
         }
         //thread-safety: make sure this is only ever called once at a time, and only one of reading/writing logs should ever be executing at once
         objc_sync_enter(self._logFileLock)
-        var files:[String]?
-        if filesToPurge == nil {
+        defer { objc_sync_exit(self._logFileLock) }
+        let files: [String]
+        if filesToPurge != nil {
+            files = filesToPurge!
+        } else {
             do {
                 files = try self._fileManager.contentsOfDirectory(atPath: self._logPath)
                     .filter { $0.hasPrefix(self._logFileNamePrefix) }
             } catch {
                 debugPrint("SWIFTLOGGER", "failed getting contents of logging directory for purge", self._logPath, error)
+                return
             }
         }
-        guard let fs = files else {
-            objc_sync_exit(self._logFileLock)
-            return
-        }
-        for file in fs {
+        for file in files {
             let fileName = self._logPath + "/" + file
             if !self._fileManager.fileExists(atPath: fileName) {
-                objc_sync_exit(self._logFileLock)
                 return
             }
             do {
@@ -378,12 +425,10 @@ open class SwiftLogger {
                 debugPrint("SWIFTLOGGER", "failed purging file at path", self._logPath, "filename", file)
             }
         }
-        objc_sync_exit(self._logFileLock)
     }
     
-    //todo: probably need to update this documentation, depending on whether we actually do async stuff
     /**
-        Guarantees all log data is flushed to disk by blocking the current thread until completion
+        Guarantees all log data is flushed to disk.
     */
     func shutdown() {
         self._flushTailToDisk(true)
