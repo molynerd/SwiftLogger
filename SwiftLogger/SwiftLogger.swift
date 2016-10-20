@@ -25,6 +25,7 @@ todo:
 >documentation: advise user to put shutdown method in on-crash or on-exit area of app
 >test logging complex objects
 >consider changing init to take in a class that will allow for easier construction
+>get the method/class/line number of what was called before hitting the log
 */
 
 import Foundation
