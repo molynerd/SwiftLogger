@@ -7,7 +7,7 @@ The goal of this library is to make it real easy to log information inside your 
 ### Startup
 ##### Anywhere in the global scope, create a SwiftLogger instance.
 
-`static let log = SwiftLogger()`
+`let log = SwiftLogger()`
 
 ### Usage
 ##### Now that you have a logger instance, create some logs.
@@ -15,9 +15,19 @@ You can create simple string logs
 
 `log.info("this is an info log")`
 
-Or log multiple things at once
+###### Which displays this
+
+`10/31/16 20:25:985 PDT | INFO | MyTestFile.swift::myFunctionName():41 | this is an info log`
+
+You can also include an object for contextual information
 
 `log.fatal("something bad happened, here's some data", myDictionaryVariable)`
+
+###### Which displays this
+
+`10/31/16 20:25:985 PDT | FATL | MyTestFile.swift::MyExplodeyFunc():7 | something bad happened, here's some data || ["aKey": 1, "2ndKey": 2]`
+
+All of the different sections of the logging format are customizable.
 
 You can think of it as an extension of `debugPrint()`
 
