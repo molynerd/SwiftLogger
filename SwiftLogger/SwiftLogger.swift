@@ -104,6 +104,9 @@ open class SwiftLogger {
             {date}      The date the message was committed
             {time}      The time the message was committed
             {timezone}  The timezone of the date the message was committed
+            {file}      The file name that the logging statement was called from (shortened to the last path component for brevity)
+            {function}  The name and signature of the function that the logging statement was called from.
+            {line}      The line of the file that the logging statement was called from.
     */
     init(
         delegate: SwiftLoggerDelegate? = nil,
@@ -119,7 +122,7 @@ open class SwiftLogger {
         self._writeToDebugPrint = alsoWriteToDebugPrint
         self._fileSize = fileSize
         self._maxStorageSize = maxFileSize
-        self._logFormat = logFormat ?? "{level}:{date} {time} {timezone}\n"
+        self._logFormat = logFormat ?? "{date} {time} {timezone} | {level} | {file}::{function}:{line} | "
         //create the logging directory
         let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .userDomainMask, true).first! as NSString
         self._logPath = topDirectory.appendingPathComponent("SwiftLogger")
@@ -166,31 +169,79 @@ open class SwiftLogger {
         }
     }
     
-    /**Info level log*/
-    func info(_ objectArgs: Any...) {
-        self._parseEntry(self._LOGLEVEL_INFO, objectArgs: objectArgs)
+    /**
+        INFO level log
+        
+        - Parameter message: A title or message for the log
+        - Parameter object: A complex object or otherwise to add as contextual information for the log.
+        - Parameter function: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the function and signature where this method was called from.
+        - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
+        - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
+     */
+    func info(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+        self._parseEntry(self._LOGLEVEL_INFO, message: message, object: object, function: function, line: line, file: file)
     }
-    func debug(_ objectArgs: Any...) {
-        self._parseEntry(self._LOGLEVEL_DEBUG, objectArgs: objectArgs)
+    /**
+        DEBUG level log
+     
+     - Parameter message: A title or message for the log
+     - Parameter object: A complex object or otherwise to add as contextual information for the log.
+     - Parameter function: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the function and signature where this method was called from.
+     - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
+     - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
+     */
+    func debug(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+        self._parseEntry(self._LOGLEVEL_DEBUG, message: message, object: object, function: function, line: line, file: file)
     }
-    func warn(_ objectArgs: Any...) {
-        self._parseEntry(self._LOGLEVEL_WARN, objectArgs: objectArgs)
+    /**
+        WARN level log
+     
+     - Parameter message: A title or message for the log
+     - Parameter object: A complex object or otherwise to add as contextual information for the log.
+     - Parameter function: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the function and signature where this method was called from.
+     - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
+     - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
+     */
+    func warn(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+        self._parseEntry(self._LOGLEVEL_WARN, message: message, object: object, function: function, line: line, file: file)
     }
-    func error(_ objectArgs: Any...) {
-        self._parseEntry(self._LOGLEVEL_ERROR, objectArgs: objectArgs)
+    /**
+        ERROR level log
+     
+     - Parameter message: A title or message for the log
+     - Parameter object: A complex object or otherwise to add as contextual information for the log.
+     - Parameter function: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the function and signature where this method was called from.
+     - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
+     - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
+     */
+    func error(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+        self._parseEntry(self._LOGLEVEL_ERROR, message: message, object: object, function: function, line: line, file: file)
     }
-    func fatal(_ objectArgs: Any...) {
-        self._parseEntry(self._LOGLEVEL_FATAL, objectArgs: objectArgs)
+    /**
+        FATAL level log
+     
+     - Parameter message: A title or message for the log
+     - Parameter object: A complex object or otherwise to add as contextual information for the log.
+     - Parameter function: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the function and signature where this method was called from.
+     - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
+     - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
+     */
+    func fatal(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+        self._parseEntry(self._LOGLEVEL_FATAL, message: message, object: object, function: function, line: line, file: file)
     }
     
     //todo: theres a potential to make this func public, so that you could set the log level programmatically, but i'm not sure how to force the coder to use one of the LOGLEVEL constants. i could just do a switch... but i feel like that's kinda lazy and might impact performance
-    //changed the objectArgs param here to an from a variadic param otherwise it will be a multi-dimensional array from the info/debug.etc call, but the compile isn't smart enough to know that will happen and consider it a single-dim array. oi.
     /**Middle function for logging, all general purpose logging functions filter into this function*/
-    fileprivate func _parseEntry(_ logLevel: String, objectArgs: [Any]) {
+    fileprivate func _parseEntry(_ logLevel: String, message: String, object: Any?, function: String, line: Int, file: String) {
         //before we process anything, get the time so know exactly when the logging occurred
         let timestamp = Date()
-        let messages = objectArgs.map({ self._getMessageFromObject($0) }).filter({ $0 != "" })
-        self._formatAndWrite(self._LOGLEVEL_INFO, timestamp: timestamp, messages: messages)
+        let objectMessage: String?
+        if let o = object {
+            objectMessage = self._getMessageFromObject(o)
+        } else {
+            objectMessage = nil
+        }
+        self._formatAndWrite(self._LOGLEVEL_INFO, timestamp: timestamp, message: message, objectMessage: objectMessage, function: function, line: line, file: file)
     }
     
     fileprivate func _getMessageFromObject(_ o: Any) -> String {
@@ -214,22 +265,32 @@ open class SwiftLogger {
     
         - Parameter logLevel: The log level for the batch of messages (_LOGLEVEL).
         - Parameter timestamp: The time at which the logger was called to process a logging event.
-        - Parameter messages: The unformatted messages to log.
+        - Parameter message: The literal message from the log.
+        - Parameter objectMessage: The string version of an object provided at the top level of logging, or nil.
+        - Parameter function: The name of the function the logging statement existed in.
+        - Parameter line: The line of the file the logging statement existed in.
+        - Parameter file: The path of the file the logging staement existed in.
     */
-    fileprivate func _formatAndWrite(_ logLevel: String, timestamp: Date, messages: [String]) {
-        /*EXPECTED FORMAT
-        INFO:01/23/16 13:45:123456 PDT
-        >this is the first in the batch
-        >this is the second in the batch
-        ERROR:01/23/16 13:45:123456 PDT
-        >this is the next one but it's an error
-        */
+    fileprivate func _formatAndWrite(_ logLevel: String, timestamp: Date, message: String, objectMessage: String?, function: String, line: Int, file: String) {
+        //get the last component of the file string for brevity
+        let fileName: String
+        if let n = file.components(separatedBy: "/").last {
+            fileName = n
+        } else {
+            fileName = ""
+        }
         var clean = self._logFormat
             .replacingOccurrences(of: "{level}", with: logLevel)
             .replacingOccurrences(of: "{date}", with: dateFormatters._date.string(from: timestamp))
             .replacingOccurrences(of: "{time}", with: dateFormatters._time.string(from: timestamp))
             .replacingOccurrences(of: "{timezone}", with: dateFormatters._zone.string(from: timestamp))
-        clean += messages.map { ">\($0)" }.joined(separator: "\n")
+            .replacingOccurrences(of: "{function}", with: function)
+            .replacingOccurrences(of: "{line}", with: String(line))
+            .replacingOccurrences(of: "{file}", with: fileName)
+        clean += message
+        if let m = objectMessage {
+            clean += " || " + m
+        }
         self._write(clean)
     }
     
@@ -247,7 +308,7 @@ open class SwiftLogger {
             self._protected.currentLogTail += message
         }
         if self._writeToDebugPrint {
-            debugPrint("SWIFTLOGGER-LOG-MESSAGE", message)
+            print(message)
         }
         //let the delegate know it's been written
         self.tailDelegate?.swiftLogger(didWriteLogToTail: message)
