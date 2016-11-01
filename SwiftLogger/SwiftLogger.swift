@@ -71,8 +71,8 @@ open class SwiftLogger {
     fileprivate var _nextFileName: String { get { return self._logPath + "/" + self._logFileNamePrefix + String(format: "%09d", self._protected.nextFileNumber) + ".txt" } }
     /**The prefix for files created by the logger*/
     fileprivate let _logFileNamePrefix: String = "log_"
-    /**If true, logging messages are written to the debugPrint output as well.*/
-    fileprivate let _writeToDebugPrint: Bool
+    /**If true, logging messages are written to the standard output as well.*/
+    fileprivate let _writeToStandardOutput: Bool
     /**The format to use when writing to the log*/
     fileprivate let _logFormat: String
     
@@ -94,10 +94,10 @@ open class SwiftLogger {
         Creates an instance of the logger
     
         - Parameter delegate: A delegate to receive messages about what the logger is doing
-        - Parameter alsoWriteToDebugPrint: if true, all log messages are also written to debugPrint, denoted by "SWIFTLOGGER-LOG-MESSAGE-MESSAGE"
+        - Parameter alsoWriteToStandardOutput: if true, all log messages are also written to standard output (usually the debug area in Xcode)
         - Parameter directory: The directory in which to save log files. Defaults to `.applicationSupportDirectory`.
         - Parameter domain: The file system domain to search for the directory. Defaults to `.userDomainMask`.
-        - Parameter explodeOnFailureToInit: If true, a fatal error will occur if the initialization fails. Defaults to true assuming that the application is dependent on logging. If this is not the case, simply use false here, and only `debugPrint` will be advise you that no logging will occur, denoted by "SWIFTLOGGER-NOLOG-MESSAGE-MESSAGE".
+        - Parameter explodeOnFailureToInit: If true, a fatal error will occur if the initialization fails. Defaults to true assuming that the application is dependent on logging. If this is not the case, simply supply false here, and only the standard output will be advise you that no logging will occur, denoted by "SWIFTLOGGER-NOLOG-MESSAGE".
         - Parameter fileSize: The size of the tail before writing to disk, in bytes, this is effectively the size of each file
         - Parameter logFormat: The format to use when logging. If nil, the default format is used. The following terms are recognized
             {level}     The log level
@@ -110,7 +110,7 @@ open class SwiftLogger {
     */
     init(
         delegate: SwiftLoggerDelegate? = nil,
-        alsoWriteToDebugPrint: Bool = false,
+        alsoWriteToStandardOutput: Bool = false,
         directory: FileManager.SearchPathDirectory = .applicationSupportDirectory,
         domain: FileManager.SearchPathDomainMask = .userDomainMask,
         explodeOnFailureToInit: Bool = true,
@@ -119,7 +119,7 @@ open class SwiftLogger {
         logFormat: String? = nil) {
         self.flushDelegate = delegate as? SwiftLoggerFlushDelegate
         self.tailDelegate = delegate as? SwiftLoggerTailDelegate
-        self._writeToDebugPrint = alsoWriteToDebugPrint
+        self._writeToStandardOutput = alsoWriteToStandardOutput
         self._fileSize = fileSize
         self._maxStorageSize = maxFileSize
         self._logFormat = logFormat ?? "{date} {time} {timezone} | {level} | {file}::{function}:{line} | "
@@ -297,7 +297,7 @@ open class SwiftLogger {
     /**Writes the message to the current tail*/
     fileprivate func _write(_ message: String) {
         if !self.loggingIsActive {
-            debugPrint("SWIFTLOGGER-NOLOG-MESSAGE", message)
+            print("SWIFTLOGGER-NOLOG-MESSAGE", message)
             return
         }
         //append to the log
@@ -307,7 +307,7 @@ open class SwiftLogger {
         } else {
             self._protected.currentLogTail += message
         }
-        if self._writeToDebugPrint {
+        if self._writeToStandardOutput {
             print(message)
         }
         //let the delegate know it's been written
