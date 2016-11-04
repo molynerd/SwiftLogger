@@ -50,7 +50,7 @@ class SwiftLoggerTests: XCTestCase {
             "2ndKey" : 2
         ]
         self.measure {
-            self.log.info("performance run " + r, object: d)
+            self.log.info("performance run " + r, d)
         }
         self._validate(true)
 
@@ -98,7 +98,7 @@ class SwiftLoggerTests: XCTestCase {
     
     func testWriteMultipleLog() {
         for i in 0...self.logsToWrite {
-            self.log.info("\(i) write these to the log", object: self._rand())
+            self.log.info("\(i) write these to the log", self._rand())
         }
         self._validate(true)
     }

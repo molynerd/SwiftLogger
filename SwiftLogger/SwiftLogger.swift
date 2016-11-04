@@ -176,7 +176,7 @@ open class SwiftLogger {
         - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
         - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
-    func info(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+    func info(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
         self._parseEntry(self._LOGLEVEL_INFO, message: message, object: object, function: function, line: line, file: file)
     }
     /**
@@ -188,7 +188,7 @@ open class SwiftLogger {
      - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
-    func debug(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+    func debug(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
         self._parseEntry(self._LOGLEVEL_DEBUG, message: message, object: object, function: function, line: line, file: file)
     }
     /**
@@ -200,7 +200,7 @@ open class SwiftLogger {
      - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
-    func warn(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+    func warn(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
         self._parseEntry(self._LOGLEVEL_WARN, message: message, object: object, function: function, line: line, file: file)
     }
     /**
@@ -212,7 +212,7 @@ open class SwiftLogger {
      - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
-    func error(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+    func error(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
         self._parseEntry(self._LOGLEVEL_ERROR, message: message, object: object, function: function, line: line, file: file)
     }
     /**
@@ -224,7 +224,7 @@ open class SwiftLogger {
      - Parameter line: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the line number where this method was called from.
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
-    func fatal(_ message: String, object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
+    func fatal(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
         self._parseEntry(self._LOGLEVEL_FATAL, message: message, object: object, function: function, line: line, file: file)
     }
     
@@ -239,7 +239,7 @@ open class SwiftLogger {
         } else {
             objectMessage = nil
         }
-        self._formatAndWrite(self._LOGLEVEL_INFO, timestamp: timestamp, message: message, objectMessage: objectMessage, function: function, line: line, file: file)
+        self._formatAndWrite(logLevel, timestamp: timestamp, message: message, objectMessage: objectMessage, function: function, line: line, file: file)
     }
     
     fileprivate func _getMessageFromObject(_ o: Any) -> String {
