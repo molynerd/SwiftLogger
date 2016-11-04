@@ -165,6 +165,15 @@ open class SwiftLogger {
                 debugPrint("SWIFTLOGGER", "failed parsing last log file number", lf, "trimmed", trimmed)
             }
         }
+        self._fileManager.createFile(atPath: self._nextFileName + ".handle", contents: nil, attributes: nil)
+        self._protected.fileHandle = FileHandle(forWritingAtPath: self._nextFileName + ".handle")!
+    }
+    
+    deinit {
+        self.shutdown()
+        //we only truly want to close the file handle when the logger is de-referenced.
+        self._protected.fileHandle.synchronizeFile()
+        self._protected.fileHandle.closeFile()
     }
     
     /**
@@ -298,6 +307,7 @@ open class SwiftLogger {
             print("SWIFTLOGGER-NOLOG-MESSAGE", message)
             return
         }
+        self._protected.fileHandle.write((message + "\n").data(using: String.Encoding.utf8)!)
         //append to the log
         //if there's already stuff in the tail, slap a line break in there to break up the messages
         if self._protected.currentLogTail != "" {
@@ -492,6 +502,7 @@ open class SwiftLogger {
     */
     func shutdown() {
         self._flushTailToDisk(true)
+//        self._protected.fileHandle.synchronizeFile()
     }
     
     // MARK - utilities
@@ -553,9 +564,27 @@ open class SwiftLogger {
             }
         }
         
+        private var _fileHandleLock = pthread_rwlock_t()
+        private var _fileHandle = FileHandle()
+        fileprivate var fileHandle: FileHandle {
+            get {
+                var handle: FileHandle? = nil
+                self._with(&self._fileHandleLock) {
+                    handle = self._fileHandle
+                }
+                return handle ?? FileHandle()
+            }
+            set {
+                self._with_write(&self._fileHandleLock) {
+                    self._fileHandle = newValue
+                }
+            }
+        }
+        
         init() {
             pthread_rwlock_init(&self._currentLogTailLock, nil)
             pthread_rwlock_init(&self._nextFileNumberLock, nil)
+            pthread_rwlock_init(&self._fileHandleLock, nil)
         }
         
         /**Thread safety method for accessing shared resource with multiple concurrent readers*/
