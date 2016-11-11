@@ -17,14 +17,13 @@ class SwiftLoggerTests: XCTestCase {
     override func setUp() {
         //reset the logger instance to default
         log = SwiftLogger()
-        //log.purgeLogs(nil)
         log.fileDelegate = nil
         log.tailDelegate = nil
         super.setUp()
     }
     
     override func tearDown() {
-        //log.purgeLogs(nil)
+        log.purgeLogs(nil)
         log.fileDelegate = nil
         log.tailDelegate = nil
         super.tearDown()

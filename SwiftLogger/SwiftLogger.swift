@@ -53,32 +53,34 @@ protocol SwiftLoggerTailDelegate: SwiftLoggerDelegate {
 }
 
 open class SwiftLogger {
-    /**Determines if logging can occur. This is set to false if problems were encountered during initialization*/
+    /** Determines if logging can occur. This is set to false if problems were encountered during initialization*/
     var loggingIsActive: Bool = true
     
-    /**NSFileManager singleton instance*/
+    /** NSFileManager singleton instance*/
     fileprivate let _fileManager: FileManager = FileManager.default
-    /**Logging location*/
+    /** Logging location*/
     fileprivate let _logPath: String
-    /**The size of the tail before writing a disk, in bytes, this is effectively slightly smaller than the size of each file. Once the tail contains exactly or more bytes than specified here, it is written to a file.*/
+    /** The size of the tail before writing a disk, in bytes, this is effectively slightly smaller than the size of each file. Once the tail contains exactly or more bytes than specified here, it is written to a file.*/
     fileprivate let _fileSize: UInt
-    /**The maximum size of storage for all logs, in bytes. If this value is set, the logger will start deleting older files, in favor of newer ones, when the maximum is met.*/
+    /** The maximum size of storage for all logs, in bytes. If this value is set, the logger will start deleting older files, in favor of newer ones, when the maximum is met.*/
     fileprivate let _maxStorageSize: UInt64?
-    /**Generates the name and file path for the next file that will be written to disk*/
+    /** Generates the name and file path for the next file that will be written to disk*/
     fileprivate var _nextFileName: String { get { return self._logPath + "/" + self._logFileNamePrefix + String(format: "%09d", self._protected.nextFileNumber) + ".txt" } }
-    /**The prefix for files created by the logger*/
+    /** The prefix for files created by the logger*/
     fileprivate let _logFileNamePrefix: String = "log_"
-    /**If true, logging messages are written to the standard output as well.*/
+    /** If true, logging messages are written to the standard output as well.*/
     fileprivate let _writeToStandardOutput: Bool
-    /**The format to use when writing to the log*/
+    /** The format to use when writing to the log*/
     fileprivate let _logFormat: String
+    /** The active log level (LogLevelTypes) in bitmask form*/
+    fileprivate let _activeLogLevel: UInt8
     
     /*
     LOCKING
     */
-    /**Contains mutable variables that need thread protection*/
+    /** Contains mutable variables that need thread protection*/
     fileprivate let _protected = threadProtected()
-    /**Mutex lock object for preventing read/write operations on log files from happening simultaneously*/
+    /** Mutex lock object for preventing read/write operations on log files from happening simultaneously*/
     fileprivate let _logFileLock = NSObject()
     
     /*
@@ -104,6 +106,7 @@ open class SwiftLogger {
             {file}      The file name that the logging statement was called from (shortened to the last path component for brevity)
             {function}  The name and signature of the function that the logging statement was called from.
             {line}      The line of the file that the logging statement was called from.
+        - Parameter activeLogLevels: The logging levels that you want written to the log. This allows you to control what goes into the log files, dynamically. If nil is provided, all levels are written.
     */
     init(
         delegate: SwiftLoggerDelegate? = nil,
@@ -113,13 +116,23 @@ open class SwiftLogger {
         explodeOnFailureToInit: Bool = true,
         fileSize: UInt = 1000,
         maxFileSize: UInt64? = nil,
-        logFormat: String? = nil) {
+        logFormat: String? = nil,
+        activeLogLevels: [LogLevelTypes]? = nil) {
         self.fileDelegate = delegate as? SwiftLoggerFileDelegate
         self.tailDelegate = delegate as? SwiftLoggerTailDelegate
         self._writeToStandardOutput = alsoWriteToStandardOutput
         self._fileSize = fileSize
         self._maxStorageSize = maxFileSize
         self._logFormat = logFormat ?? "{date} {time} {timezone} | {level} | {file}::{function}:{line} | "
+        if let ll = activeLogLevels, ll.count > 0 {
+            var combined = ll.first!.rawValue
+            for r in 1..<ll.count {
+                combined = combined | ll[r].rawValue
+            }
+            self._activeLogLevel = combined
+        } else {
+            self._activeLogLevel = LogLevelTypes.allCombined
+        }
         //create the logging directory
         let topDirectory: NSString = NSSearchPathForDirectoriesInDomains(directory, .userDomainMask, true).first! as NSString
         self._logPath = topDirectory.appendingPathComponent("SwiftLogger")
@@ -189,7 +202,7 @@ open class SwiftLogger {
         - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
     func info(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
-        self._parseEntry(self._LOGLEVEL_INFO, message: message, object: object, function: function, line: line, file: file)
+        self._parseEntry(.info, message: message, object: object, function: function, line: line, file: file)
     }
     /**
         DEBUG level log
@@ -201,7 +214,7 @@ open class SwiftLogger {
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
     func debug(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
-        self._parseEntry(self._LOGLEVEL_DEBUG, message: message, object: object, function: function, line: line, file: file)
+        self._parseEntry(.debug, message: message, object: object, function: function, line: line, file: file)
     }
     /**
         WARN level log
@@ -213,7 +226,7 @@ open class SwiftLogger {
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
     func warn(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
-        self._parseEntry(self._LOGLEVEL_WARN, message: message, object: object, function: function, line: line, file: file)
+        self._parseEntry(.warn, message: message, object: object, function: function, line: line, file: file)
     }
     /**
         ERROR level log
@@ -225,7 +238,7 @@ open class SwiftLogger {
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
     func error(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
-        self._parseEntry(self._LOGLEVEL_ERROR, message: message, object: object, function: function, line: line, file: file)
+        self._parseEntry(.error, message: message, object: object, function: function, line: line, file: file)
     }
     /**
         FATAL level log
@@ -237,14 +250,19 @@ open class SwiftLogger {
      - Parameter file: DO NOT SUPPLY THIS ARGUMENT. This is filled automatically and will contain the name of the file this method was called from.
      */
     func fatal(_ message: String, _ object: Any? = nil, function: String = #function, line: Int = #line, file: String = #file) {
-        self._parseEntry(self._LOGLEVEL_FATAL, message: message, object: object, function: function, line: line, file: file)
+        self._parseEntry(.fatal, message: message, object: object, function: function, line: line, file: file)
     }
     
     //todo: theres a potential to make this func public, so that you could set the log level programmatically, but i'm not sure how to force the coder to use one of the LOGLEVEL constants. i could just do a switch... but i feel like that's kinda lazy and might impact performance
     /**Middle function for logging, all general purpose logging functions filter into this function*/
-    fileprivate func _parseEntry(_ logLevel: String, message: String, object: Any?, function: String, line: Int, file: String) {
+    fileprivate func _parseEntry(_ logLevel: LogLevelTypes, message: String, object: Any?, function: String, line: Int, file: String) {
         //before we process anything, get the time so know exactly when the logging occurred
         let timestamp = Date()
+        //make sure the log level is in the set that the user wants to write
+        if logLevel.rawValue & self._activeLogLevel == 0 {
+            //nope, don't write it
+            return
+        }
         let objectMessage: String?
         if let o = object {
             objectMessage = self._getMessageFromObject(o)
@@ -273,7 +291,7 @@ open class SwiftLogger {
     /**
         Prepares a message to be written by formatting it and then writes the formatted message to the log file.
     
-        - Parameter logLevel: The log level for the batch of messages (_LOGLEVEL).
+        - Parameter logLevel: The log level for the batch of messages.
         - Parameter timestamp: The time at which the logger was called to process a logging event.
         - Parameter message: The literal message from the log.
         - Parameter objectMessage: The string version of an object provided at the top level of logging, or nil.
@@ -281,7 +299,7 @@ open class SwiftLogger {
         - Parameter line: The line of the file the logging statement existed in.
         - Parameter file: The path of the file the logging staement existed in.
     */
-    fileprivate func _formatAndWrite(_ logLevel: String, timestamp: Date, message: String, objectMessage: String?, function: String, line: Int, file: String) {
+    fileprivate func _formatAndWrite(_ logLevel: LogLevelTypes, timestamp: Date, message: String, objectMessage: String?, function: String, line: Int, file: String) {
         //get the last component of the file string for brevity
         let fileName: String
         if let n = file.components(separatedBy: "/").last {
@@ -290,7 +308,7 @@ open class SwiftLogger {
             fileName = ""
         }
         var clean = self._logFormat
-            .replacingOccurrences(of: "{level}", with: logLevel)
+            .replacingOccurrences(of: "{level}", with: logLevel.label)
             .replacingOccurrences(of: "{date}", with: dateFormatters._date.string(from: timestamp))
             .replacingOccurrences(of: "{time}", with: dateFormatters._time.string(from: timestamp))
             .replacingOccurrences(of: "{timezone}", with: dateFormatters._zone.string(from: timestamp))
@@ -528,12 +546,45 @@ open class SwiftLogger {
     }
     
     // MARK - utilities
-    //log levels. you might be asking... why ERRR and FATL? it's because im kinda OCD about how the log looks and this makes everything line up vertically.
-    fileprivate let _LOGLEVEL_INFO =     "INFO"
-    fileprivate let _LOGLEVEL_DEBUG =    "DEBG"
-    fileprivate let _LOGLEVEL_WARN =     "WARN"
-    fileprivate let _LOGLEVEL_ERROR =    "ERRR"
-    fileprivate let _LOGLEVEL_FATAL =    "FATL"
+    //log level types to decide, dynamically, what you want going into the log files
+    enum LogLevelTypes: UInt8 {
+        case info = 1
+        case debug = 2
+        case warn = 4
+        case error = 8
+        case fatal = 16
+        
+        /** All LogLevelTypes combined into a bitmask value*/
+        static var allCombined: UInt8 {
+            get {
+                let all: [LogLevelTypes] = [.debug, .warn, .error, .fatal]
+                var combo: UInt8 = LogLevelTypes.info.rawValue
+                for l in all {
+                    combo = combo | l.rawValue
+                }
+                return combo
+            }
+        }
+        
+        //you might be asking... why ERRR and FATL? it's because im kinda OCD about how the log looks and this makes everything line up vertically.
+        /** The string representation of the enum*/
+        var label: String {
+            get {
+                switch self {
+                case .info:
+                    return "INFO"
+                case .debug:
+                    return "DEBG"
+                case .warn:
+                    return "WARN"
+                case .error:
+                    return "ERRR"
+                case .fatal:
+                    return "FATL"
+                }
+            }
+        }
+    }
     
     fileprivate class dateFormatters: DateFormatter {
         init(_ format: String) {

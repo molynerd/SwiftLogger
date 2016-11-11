@@ -56,6 +56,7 @@ if let dict = try? log.getLogs() {
 - Control the size of files
 - Control the maximum amount of storage to use for logging files
 - Control the output format for logging messages
+- Control, dynamically, which logging methods are actively writing to the log (log level)
 - Hook into delegates to have greater visibility on the logging tail, and writing to disk operations
 - Decide how important logging is (if something bad happens in the logger, do you want the application to crash, or continue without logging)
 
