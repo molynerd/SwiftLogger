@@ -32,9 +32,8 @@ All of the different sections of the logging format are customizable.
 You can think of it as an extension of `debugPrint()`
 
 ##### Ready to read what's in there?
-The simplest way is to grab all files, send them to your server and purge them. First call `shutdown()`, which simply tells the logger to make sure everything is ready to be read (the logger still works afterward). Then consume and purge the logs.
+The simplest way is to grab all files, send them to your server and purge them.
 ```
-log.shutdown()
 let logs = try? log.getLogs().values
 //todo: send the log strings to your server
 //purge the logs
@@ -42,7 +41,6 @@ log.purgeLogs()
 ```
 Need more specifics? `getLogs()` returns the name of the file and the contents, so you can decide how to deal with each set.
 ```
-log.shutdown()
 if let dict = try? log.getLogs() {
     for pair in dict {
         //todo: do something with the contents
