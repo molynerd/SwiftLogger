@@ -34,15 +34,14 @@ enum SwiftLoggerGetLogsError: Error {
 }
 
 /**Base class for the delegates*/
-protocol SwiftLoggerDelegate {
-}
-/**Delegate that provides information on flushing tasks (tail being written to disk)*/
-protocol SwiftLoggerFlushDelegate: SwiftLoggerDelegate {
+protocol SwiftLoggerDelegate {}
+/**Delegate that provides information on file tasks*/
+protocol SwiftLoggerFileDelegate: SwiftLoggerDelegate {
     /**
-        Advises the delegate that the current tail has been flushed to disk.
-        - Parameter wasManual: Determines if the flush was caused by a user (true) or by the internals (false)
+        Advises the delegate that a new file was created
+        - Parameter fileName: The name of the file and path that was created
     */
-    func swiftLogger(didFlushTailToDisk wasManual: Bool)
+    func swiftLogger(didCreateNewFile filePath: String)
 }
 /**Delegate that provides information on the log tail*/
 protocol SwiftLoggerTailDelegate: SwiftLoggerDelegate {
@@ -85,7 +84,7 @@ open class SwiftLogger {
     /*
     DELEGATES
     */
-    var flushDelegate: SwiftLoggerFlushDelegate?
+    var fileDelegate: SwiftLoggerFileDelegate?
     var tailDelegate: SwiftLoggerTailDelegate?
     
     /**
@@ -115,7 +114,7 @@ open class SwiftLogger {
         fileSize: UInt = 1000,
         maxFileSize: UInt64? = nil,
         logFormat: String? = nil) {
-        self.flushDelegate = delegate as? SwiftLoggerFlushDelegate
+        self.fileDelegate = delegate as? SwiftLoggerFileDelegate
         self.tailDelegate = delegate as? SwiftLoggerTailDelegate
         self._writeToStandardOutput = alsoWriteToStandardOutput
         self._fileSize = fileSize
@@ -127,7 +126,7 @@ open class SwiftLogger {
         if !self._fileManager.fileExists(atPath: self._logPath) {
             //it would be unfortunate if this blew up, but it will also tell you, immediately, that there's a config problem
             do {
-                try self._fileManager.createDirectory(atPath: self._logPath, withIntermediateDirectories: false, attributes: nil)
+                try self._fileManager.createDirectory(atPath: self._logPath, withIntermediateDirectories: true, attributes: nil)
             } catch {
                 debugPrint("SWIFTLOGGER", "failed getting log directory due to", error)
                 if explodeOnFailureToInit {
@@ -159,20 +158,24 @@ open class SwiftLogger {
             let trimmed = lf
                 .replacingOccurrences(of: self._logFileNamePrefix, with: "", options: [.caseInsensitive, .anchored])
                 .replacingOccurrences(of: ".txt", with: "", options: [.caseInsensitive, .anchored, .backwards])
-            if let i = Int(trimmed) {
-                self._protected.nextFileNumber = i + 1
+            if let n = Int(trimmed) {
+                //don't append to this yet. we'll use the current file number until the filehandle is attached
+                self._protected.nextFileNumber = n
             } else {
                 debugPrint("SWIFTLOGGER", "failed parsing last log file number", lf, "trimmed", trimmed)
             }
         }
-        self._fileManager.createFile(atPath: self._nextFileName + ".handle", contents: nil, attributes: nil)
-        self._protected.fileHandle = FileHandle(forWritingAtPath: self._nextFileName + ".handle")!
+        
+        if !self._fileManager.fileExists(atPath: self._nextFileName) {
+            self._createNewFile(incrementFileNumberAfter: true)
+        } else {
+            self._attachFileHandle(self._nextFileName)
+        }
     }
     
     deinit {
         self.shutdown()
-        //we only truly want to close the file handle when the logger is de-referenced.
-        self._protected.fileHandle.synchronizeFile()
+        //we only truly want to close the file handle when the logger is de-referenced
         self._protected.fileHandle.closeFile()
     }
     
@@ -268,7 +271,7 @@ open class SwiftLogger {
     }
     
     /**
-        Prepares a batch of message to be written by formatting them and then writes the batch to the log file.
+        Prepares a message to be written by formatting it and then writes the formatted message to the log file.
     
         - Parameter logLevel: The log level for the batch of messages (_LOGLEVEL).
         - Parameter timestamp: The time at which the logger was called to process a logging event.
@@ -296,73 +299,93 @@ open class SwiftLogger {
             .replacingOccurrences(of: "{file}", with: fileName)
         clean += message
         if let m = objectMessage {
+            //todo: make an option for this separator?
             clean += " || " + m
         }
         self._write(clean)
     }
     
-    /**Writes the message to the current tail*/
+    /**Writes the message to the current file*/
     fileprivate func _write(_ message: String) {
         if !self.loggingIsActive {
             print("SWIFTLOGGER-NOLOG-MESSAGE", message)
             return
         }
-        self._protected.fileHandle.write((message + "\n").data(using: String.Encoding.utf8)!)
-        //append to the log
-        //if there's already stuff in the tail, slap a line break in there to break up the messages
-        if self._protected.currentLogTail != "" {
-            self._protected.currentLogTail += "\n" + message
-        } else {
-            self._protected.currentLogTail += message
+        //add a new line to the end of the message
+        let finalMessage = message + "\n"
+        guard let messageData = finalMessage.data(using: String.Encoding.utf8) else {
+            debugPrint("SWIFTLOGGER", "failed encoding log message to utf8", finalMessage)
+            return
         }
+        
+        //todo: opportunity here to send this off to background thread. perf testing shows that this isn't necessary, 
+        //but if you log something crazy huge, it could take a while... maybe add a 1MB message write perf test to see if we really want to go that far.
+        
+        //thread-safety: make sure this is only ever called once at a time, and only one of reading/writing logs should ever be executing at once
+        objc_sync_enter(self._logFileLock)
+        //write to the file
+        self._protected.fileHandle.write(messageData)
+        objc_sync_exit(self._logFileLock)
+        
+        //write the message to output if needed
         if self._writeToStandardOutput {
             print(message)
         }
+        
         //let the delegate know it's been written
         self.tailDelegate?.swiftLogger(didWriteLogToTail: message)
-        //check if we need to flush to disk
-        if UInt(self._protected.currentLogTail.utf8.count) > self._fileSize {
-            self._flushTailToDisk(false)
+        
+        //check if we need to create a new file
+        //lock out the file before we do this, just in case some other thread pushed us over the limit and created a new file
+        objc_sync_enter(self._logFileLock)
+        if UInt(self._protected.fileHandle.availableData.count) > self._fileSize {
+            self._createNewFile()
         }
+        objc_sync_exit(self._logFileLock)
     }
     
-    /**
-        Flushes the tail to a file on the disk.
-    
-        - Parameter manualFlush: determines if the flush was called by a user (true) or by the internals (false)
-    */
-    fileprivate func _flushTailToDisk(_ manualFlush: Bool) {
-        if !self.loggingIsActive {
-            debugPrint("SWIFTLOGGER-NOLOG", "attempted to flush but logging inactive")
-            return
+    /** 
+        Creates a new file and resets the filehandle to point to it
+        
+        - Parameter incrementFileNumberAfter: Increments the next file marker AFTER creating the file.
+     */
+    fileprivate func _createNewFile(incrementFileNumberAfter: Bool = false) {
+        //update the next file number and create the file
+        if !incrementFileNumberAfter {
+            self._protected.nextFileNumber += 1
+        } else {
+            defer { self._protected.nextFileNumber += 1 }
         }
-        if self._protected.currentLogTail == "" {
-            return
+        //make sure the file doesn't already exist.
+        if !self._fileManager.fileExists(atPath: self._nextFileName) {
+            guard self._fileManager.createFile(atPath: self._nextFileName, contents: nil, attributes: nil) else {
+                debugPrint("SWIFTLOGGER", "failed to create new file. will continue to use current file", self._nextFileName)
+                return
+            }
         }
-        let finalPath = self._nextFileName
-        //thread-safety: make sure this is only ever called once at a time, and only one of reading/writing logs should ever be executing at once
-        debugPrint("SWIFTLOGGER", "final write path", finalPath)
-        do {
-            objc_sync_enter(self._logFileLock)
-            defer { objc_sync_exit(self._logFileLock) }
-            try self._protected.currentLogTail.write(toFile: finalPath, atomically: true, encoding: String.Encoding.utf8)
-        } catch {
-            debugPrint("SWIFTLOGGER", "failed attempting to write file to a path", error)
-            return
-        }
-        //now that we've written the file, check if we need to do some cleanup
+        debugPrint("SWIFTLOGGER", "created file at path", self._nextFileName)
+        //if we have a file delegate, let them know we have a new file
+        self.fileDelegate?.swiftLogger(didCreateNewFile: self._nextFileName)
+        self._attachFileHandle(nil)
+        //apply our storage limit
         self._applyStorageLimit()
-        //reset the tail and set our next file number
-        self._protected.currentLogTail = ""
-        self._protected.nextFileNumber += 1
-        //let the delegate know the tail has been flushed
-        self.flushDelegate?.swiftLogger(didFlushTailToDisk: manualFlush)
+    }
+    
+    /** 
+        Attaches the files handler to the file
+        - Parameter filePath: The path to the file to attach the filehandle to. If nil, the filehandle is attached to `self._nextFileName`
+     */
+    fileprivate func _attachFileHandle(_ filePath: String?) {
+        //close the filehandle and reopen it on the new file
+        self._protected.fileHandle.synchronizeFile()
+        self._protected.fileHandle.closeFile()
+        self._protected.fileHandle = FileHandle(forUpdatingAtPath: filePath ?? self._nextFileName)!
     }
     
     /**Checks if the maximum storage limit has been reached, and if so, deletes old files*/
     fileprivate func _applyStorageLimit() {
         //todo: now that we have this, create a new delegate that hooks into files we're about to delete
-        //todo: might need to change delegate to list<delegates>
+        //todo: might need to change delegate to list<delegates>. a user might want to have separate implementations, not one delegate that implements everything they want
         //no max storage size? dont do anything
         guard let max = self._maxStorageSize else {
             return
@@ -501,8 +524,7 @@ open class SwiftLogger {
         Guarantees all log data is flushed to disk.
     */
     func shutdown() {
-        self._flushTailToDisk(true)
-//        self._protected.fileHandle.synchronizeFile()
+        self._protected.fileHandle.synchronizeFile()
     }
     
     // MARK - utilities
